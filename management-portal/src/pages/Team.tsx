@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import { collection, getDocs, doc, deleteDoc } from 'firebase/firestore';
-import { db } from '../config/firebase';
+import { collection, getDocs, doc, deleteDoc, setDoc, Timestamp } from 'firebase/firestore';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { auth, db } from '../config/firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { createUserAsAdmin } from '../utils/adminAuth';
 import { createNotification } from '../utils/notifications';
 import type { User } from '../types';
-import { Plus, Mail, Briefcase, Shield, Trash2, AlertTriangle } from 'lucide-react';
+import { Plus, Mail, Briefcase, Shield, Trash2, AlertTriangle, Copy, Eye, EyeOff } from 'lucide-react';
 
 export const Team = () => {
   const { currentUser, userRole } = useAuth();
@@ -16,12 +16,15 @@ export const Team = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [generatedPassword, setGeneratedPassword] = useState('');
   const [formData, setFormData] = useState({
     email: '',
     displayName: '',
     password: '',
     role: 'member' as 'superadmin' | 'admin' | 'member',
     department: '',
+    phone: '',
   });
 
   useEffect(() => {
@@ -46,8 +49,20 @@ export const Team = () => {
     }
   };
 
+  // Generate random password
+  const generatePassword = () => {
+    const length = 12;
+    const charset = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*';
+    let password = '';
+    for (let i = 0; i < length; i++) {
+      password += charset.charAt(Math.floor(Math.random() * charset.length));
+    }
+    setFormData({ ...formData, password });
+    setGeneratedPassword(password);
+  };
+
   const handleCreateUser = async () => {
-    if (!formData.email || !formData.password || !formData.displayName) {
+    if (!currentUser || !formData.email || !formData.displayName || !formData.password) {
       setError('Please fill all required fields');
       return;
     }
@@ -57,48 +72,78 @@ export const Team = () => {
       return;
     }
 
+    setLoading(true);
     setError('');
     setSuccess('');
-    setLoading(true);
 
     try {
-      const newUserId = await createUserAsAdmin(
-        formData.email,
-        formData.password,
-        formData.displayName,
-        formData.role,
-        formData.department
+      // Create user in Firebase Authentication
+      const userCredential = await createUserWithEmailAndPassword(
+        auth, 
+        formData.email, 
+        formData.password
       );
+      const newUser = userCredential.user;
 
-      // Create notification for new user
-      await createNotification(
-        newUserId,
-        'Welcome to the team! 🎉',
-        `Your account has been created. You can now login with your email.`,
-        'user'
-      );
+      try {
+        // Create user document in Firestore
+        await setDoc(doc(db, 'users', newUser.uid), {
+          email: formData.email,
+          displayName: formData.displayName,
+          role: formData.role,
+          phone: formData.phone || '',
+          department: formData.department || '',
+          status: 'active',
+          createdAt: Timestamp.now(),
+          createdBy: currentUser.uid,
+        });
 
-      setSuccess('User created successfully!');
-      setShowModal(false);
-      setFormData({
-        email: '',
-        displayName: '',
-        password: '',
-        role: 'member',
-        department: '',
-      });
-      
-      setTimeout(() => {
+        // Create notification for new user
+        await createNotification(
+          newUser.uid,
+          'Welcome to the team! 🎉',
+          'Your account has been created. You can now login with your email.',
+          'user'
+        );
+
+        // Show success with password details
+        const passwordInfo = formData.password;
+        setSuccess(`User created successfully! Password: ${passwordInfo}`);
+        
+        // Alert with credentials
+        alert(
+          `✅ User Created Successfully!\n\n` +
+          `Name: ${formData.displayName}\n` +
+          `Email: ${formData.email}\n` +
+          `Password: ${passwordInfo}\n` +
+          `Role: ${formData.role}\n\n` +
+          `⚠️ Please share these credentials securely with the user.\n` +
+          `They can change their password in Settings after login.`
+        );
+
+        setShowModal(false);
+        resetForm();
         fetchUsers();
-        setSuccess('');
-      }, 1000);
-    } catch (err: any) {
-      if (err.code === 'auth/email-already-in-use') {
-        setError('Email already in use');
-      } else if (err.code === 'auth/weak-password') {
+
+        setTimeout(() => setSuccess(''), 5000);
+      } catch (firestoreError) {
+        // If Firestore creation fails, delete the auth user
+        await newUser.delete();
+        throw firestoreError;
+      }
+    } catch (error: any) {
+      console.error('Error creating user:', error);
+      
+      if (error.code === 'auth/email-already-in-use') {
+        setError('This email is already registered');
+      } else if (error.code === 'auth/invalid-email') {
+        setError('Invalid email address');
+      } else if (error.code === 'auth/weak-password') {
         setError('Password should be at least 6 characters');
+      } else if (error.code === 'auth/network-request-failed') {
+        setError('Network error. Please check your connection.');
       } else {
-        setError(err.message || 'Failed to create user');
+        setError('Failed to create user. Please try again.');
       }
     } finally {
       setLoading(false);
@@ -116,7 +161,12 @@ export const Team = () => {
 
     setLoading(true);
     try {
+      // Delete user document from Firestore
       await deleteDoc(doc(db, 'users', userToDelete.uid));
+      
+      // Note: To delete from Firebase Auth, you need Admin SDK on backend
+      // For now, we're just deleting from Firestore
+      
       setSuccess(`${userToDelete.displayName} has been removed from the team`);
       setShowDeleteModal(false);
       setUserToDelete(null);
@@ -124,10 +174,30 @@ export const Team = () => {
       
       setTimeout(() => setSuccess(''), 3000);
     } catch (error) {
+      console.error('Error deleting user:', error);
       setError('Failed to delete user');
     } finally {
       setLoading(false);
     }
+  };
+
+  const resetForm = () => {
+    setFormData({
+      email: '',
+      displayName: '',
+      password: '',
+      role: 'member',
+      department: '',
+      phone: '',
+    });
+    setGeneratedPassword('');
+    setShowPassword(false);
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setSuccess('Password copied to clipboard!');
+    setTimeout(() => setSuccess(''), 2000);
   };
 
   const canDeleteUser = (user: User) => {
@@ -152,7 +222,7 @@ export const Team = () => {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Team Members</h1>
           <p className="text-gray-600 mt-1">Manage your team and their roles</p>
@@ -194,12 +264,12 @@ export const Team = () => {
                   )}
                 </h3>
                 <div className="flex items-center text-sm text-gray-500 mt-1">
-                  <Mail className="h-4 w-4 mr-1" />
+                  <Mail className="h-4 w-4 mr-1 flex-shrink-0" />
                   <span className="truncate">{user.email}</span>
                 </div>
                 {user.department && (
                   <div className="flex items-center text-sm text-gray-500 mt-1">
-                    <Briefcase className="h-4 w-4 mr-1" />
+                    <Briefcase className="h-4 w-4 mr-1 flex-shrink-0" />
                     <span>{user.department}</span>
                   </div>
                 )}
@@ -255,6 +325,7 @@ export const Team = () => {
                   value={formData.displayName}
                   onChange={(e) => setFormData({ ...formData, displayName: e.target.value })}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  placeholder="John Doe"
                   disabled={loading}
                   required
                 />
@@ -269,6 +340,7 @@ export const Team = () => {
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  placeholder="john@example.com"
                   disabled={loading}
                   required
                 />
@@ -278,21 +350,54 @@ export const Team = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Password *
                 </label>
-                <input
-                  type="password"
-                  value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  disabled={loading}
-                  required
-                  minLength={6}
-                />
-                <p className="text-xs text-gray-500 mt-1">Minimum 6 characters</p>
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={formData.password}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                    className="w-full px-4 py-2 pr-20 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    placeholder="Enter password"
+                    disabled={loading}
+                    required
+                    minLength={6}
+                  />
+                  <div className="absolute right-2 top-1/2 transform -translate-y-1/2 flex items-center space-x-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="p-1.5 text-gray-400 hover:text-gray-600"
+                      title={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                    {formData.password && (
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(formData.password)}
+                        className="p-1.5 text-gray-400 hover:text-gray-600"
+                        title="Copy password"
+                      >
+                        <Copy className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center justify-between mt-2">
+                  <p className="text-xs text-gray-500">Minimum 6 characters</p>
+                  <button
+                    type="button"
+                    onClick={generatePassword}
+                    className="text-xs text-primary-600 hover:text-primary-700 font-medium"
+                    disabled={loading}
+                  >
+                    Generate Password
+                  </button>
+                </div>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Role
+                  Role *
                 </label>
                 <select
                   value={formData.role}
@@ -319,8 +424,22 @@ export const Team = () => {
                   value={formData.department}
                   onChange={(e) => setFormData({ ...formData, department: e.target.value })}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  disabled={loading}
                   placeholder="Engineering, Marketing, etc."
+                  disabled={loading}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Phone (Optional)
+                </label>
+                <input
+                  type="tel"
+                  value={formData.phone}
+                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  placeholder="+91 1234567890"
+                  disabled={loading}
                 />
               </div>
             </div>
@@ -330,6 +449,7 @@ export const Team = () => {
                 onClick={() => {
                   setShowModal(false);
                   setError('');
+                  resetForm();
                 }}
                 className="flex-1 btn-secondary"
                 disabled={loading}

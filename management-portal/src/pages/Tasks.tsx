@@ -7,19 +7,24 @@ import {
   updateDoc,
   deleteDoc,
   doc,
+  orderBy,
   where,
   Timestamp,
-  arrayUnion
+  onSnapshot
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { createNotification } from '../utils/notifications';
-import { Plus, Trash2, Edit2, CheckCircle, MessageSquare, Send } from 'lucide-react';
+import { Plus, Search, CheckCircle, Clock, AlertCircle, Trash2, Edit2, MessageCircle, Send, X } from 'lucide-react';
+import { format } from 'date-fns';
 
-interface TaskNote {
-  text: string;
-  author: string;
-  authorName: string;
+interface TaskComment {
+  id: string;
+  taskId: string;
+  message: string;
+  sentBy: string;
+  sentByName: string;
+  sentByRole: string;
   timestamp: Date;
 }
 
@@ -27,15 +32,15 @@ interface Task {
   id: string;
   title: string;
   description: string;
-  assignedTo: string;
-  assignedToName?: string;
-  assignedBy: string;
-  assignedByName?: string;
   status: 'pending' | 'in-progress' | 'completed';
   priority: 'low' | 'medium' | 'high';
-  dueDate: Date;
+  assignedTo: string;
+  assignedToName?: string;
+  createdBy: string;
+  createdByName?: string;
   createdAt: Date;
-  notes?: TaskNote[];
+  dueDate: Date;
+  commentsCount?: number;
 }
 
 export const Tasks = () => {
@@ -43,60 +48,99 @@ export const Tasks = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [showModal, setShowModal] = useState(false);
-  const [showNotesModal, setShowNotesModal] = useState(false);
+  const [showChatModal, setShowChatModal] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [comments, setComments] = useState<TaskComment[]>([]);
+  const [newComment, setNewComment] = useState('');
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [filterPriority, setFilterPriority] = useState<string>('all');
   const [loading, setLoading] = useState(false);
+  const [sendingMessage, setSendingMessage] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [filterStatus, setFilterStatus] = useState<string>('all');
-  const [noteText, setNoteText] = useState('');
   const [formData, setFormData] = useState({
     title: '',
     description: '',
-    assignedTo: '',
-    priority: 'medium' as 'low' | 'medium' | 'high',
-    dueDate: '',
     status: 'pending' as 'pending' | 'in-progress' | 'completed',
+    priority: 'medium' as 'low' | 'medium' | 'high',
+    assignedTo: '',
+    dueDate: '',
   });
 
   useEffect(() => {
-    fetchTasks();
-    if (userRole !== 'member') {
+    if (currentUser && userRole) {
+      fetchTasks();
       fetchUsers();
     }
   }, [currentUser, userRole]);
 
-  const fetchTasks = async () => {
-    if (!currentUser) return;
+  // Real-time listener for comments
+  useEffect(() => {
+    if (!selectedTask) return;
 
+    const commentsRef = collection(db, 'taskComments');
+    const q = query(
+      commentsRef,
+      where('taskId', '==', selectedTask.id),
+      orderBy('timestamp', 'asc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const commentsData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        timestamp: doc.data().timestamp?.toDate() || new Date(),
+      })) as TaskComment[];
+      
+      setComments(commentsData);
+    });
+
+    return () => unsubscribe();
+  }, [selectedTask]);
+
+  const fetchTasks = async () => {
     try {
-      const tasksQuery = userRole === 'member'
-        ? query(collection(db, 'tasks'), where('assignedTo', '==', currentUser.uid))
-        : query(collection(db, 'tasks'));
-      
-      const snapshot = await getDocs(tasksQuery);
-      const tasksData = snapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          ...data,
-          dueDate: data.dueDate?.toDate() || new Date(),
-          createdAt: data.createdAt?.toDate() || new Date(),
-          notes: data.notes?.map((note: any) => ({
-            ...note,
-            timestamp: note.timestamp?.toDate() || new Date(),
-          })) || [],
-        };
-      }) as Task[];
-      
-      tasksData.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-      
-      setTasks(tasksData);
+      const tasksRef = collection(db, 'tasks');
+      let q;
+
+      // Super Admin and Admin see ALL tasks
+      if (userRole === 'superadmin' || userRole === 'admin') {
+        q = query(tasksRef, orderBy('createdAt', 'desc'));
+      } else {
+        // Members see only THEIR assigned tasks
+        q = query(
+          tasksRef,
+          where('assignedTo', '==', currentUser?.uid),
+          orderBy('createdAt', 'desc')
+        );
+      }
+
+      const snapshot = await getDocs(q);
+      const tasksData = await Promise.all(
+        snapshot.docs.map(async (taskDoc) => {
+          const data = taskDoc.data();
+          
+          // Count comments for each task
+          const commentsRef = collection(db, 'taskComments');
+          const commentsQuery = query(commentsRef, where('taskId', '==', taskDoc.id));
+          const commentsSnapshot = await getDocs(commentsQuery);
+          
+          return {
+            id: taskDoc.id,
+            ...data,
+            createdAt: data.createdAt?.toDate() || new Date(),
+            dueDate: data.dueDate?.toDate() || new Date(),
+            commentsCount: commentsSnapshot.size,
+          };
+        })
+      );
+
+      setTasks(tasksData as Task[]);
     } catch (error) {
       console.error('Error fetching tasks:', error);
       setError('Failed to load tasks');
-      setTimeout(() => setError(''), 3000);
     }
   };
 
@@ -116,7 +160,6 @@ export const Tasks = () => {
   const handleCreateTask = async () => {
     if (!currentUser || !formData.title || !formData.assignedTo || !formData.dueDate) {
       setError('Please fill all required fields');
-      setTimeout(() => setError(''), 3000);
       return;
     }
 
@@ -128,15 +171,14 @@ export const Tasks = () => {
       await addDoc(collection(db, 'tasks'), {
         title: formData.title,
         description: formData.description,
+        status: formData.status,
+        priority: formData.priority,
         assignedTo: formData.assignedTo,
         assignedToName: assignedUser?.displayName || '',
-        assignedBy: currentUser.uid,
-        assignedByName: userData?.displayName || '',
-        status: 'pending',
-        priority: formData.priority,
-        dueDate: Timestamp.fromDate(new Date(formData.dueDate)),
+        createdBy: currentUser.uid,
+        createdByName: userData?.displayName || '',
         createdAt: Timestamp.now(),
-        notes: [],
+        dueDate: Timestamp.fromDate(new Date(formData.dueDate)),
       });
 
       await createNotification(
@@ -155,7 +197,6 @@ export const Tasks = () => {
     } catch (error) {
       console.error('Error creating task:', error);
       setError('Failed to create task');
-      setTimeout(() => setError(''), 3000);
     } finally {
       setLoading(false);
     }
@@ -165,23 +206,27 @@ export const Tasks = () => {
     if (!editingTask) return;
 
     setLoading(true);
-    setError('');
     try {
-      const updateData: any = {
+      const assignedUser = users.find(u => u.uid === formData.assignedTo);
+      
+      await updateDoc(doc(db, 'tasks', editingTask.id), {
         title: formData.title,
         description: formData.description,
-        priority: formData.priority,
         status: formData.status,
+        priority: formData.priority,
+        assignedTo: formData.assignedTo,
+        assignedToName: assignedUser?.displayName || '',
         dueDate: Timestamp.fromDate(new Date(formData.dueDate)),
-      };
+      });
 
-      if (userRole !== 'member' && formData.assignedTo) {
-        const assignedUser = users.find(u => u.uid === formData.assignedTo);
-        updateData.assignedTo = formData.assignedTo;
-        updateData.assignedToName = assignedUser?.displayName || '';
+      if (formData.assignedTo !== editingTask.assignedTo) {
+        await createNotification(
+          formData.assignedTo,
+          'Task Reassigned 📋',
+          `You have been assigned: ${formData.title}`,
+          'task'
+        );
       }
-
-      await updateDoc(doc(db, 'tasks', editingTask.id), updateData);
 
       setSuccess('Task updated successfully!');
       setShowModal(false);
@@ -193,7 +238,6 @@ export const Tasks = () => {
     } catch (error) {
       console.error('Error updating task:', error);
       setError('Failed to update task');
-      setTimeout(() => setError(''), 3000);
     } finally {
       setLoading(false);
     }
@@ -204,83 +248,99 @@ export const Tasks = () => {
 
     try {
       await deleteDoc(doc(db, 'tasks', taskId));
+      
+      // Delete all comments for this task
+      const commentsRef = collection(db, 'taskComments');
+      const commentsQuery = query(commentsRef, where('taskId', '==', taskId));
+      const commentsSnapshot = await getDocs(commentsQuery);
+      
+      const deletePromises = commentsSnapshot.docs.map(doc => deleteDoc(doc.ref));
+      await Promise.all(deletePromises);
+      
       setSuccess('Task deleted successfully!');
       fetchTasks();
       setTimeout(() => setSuccess(''), 3000);
     } catch (error) {
       console.error('Error deleting task:', error);
       setError('Failed to delete task');
-      setTimeout(() => setError(''), 3000);
     }
   };
 
-  const handleQuickStatusUpdate = async (taskId: string, newStatus: 'pending' | 'in-progress' | 'completed') => {
+  const handleStatusChange = async (taskId: string, newStatus: 'pending' | 'in-progress' | 'completed') => {
     try {
-      await updateDoc(doc(db, 'tasks', taskId), { status: newStatus });
-      setSuccess('Status updated!');
+      await updateDoc(doc(db, 'tasks', taskId), {
+        status: newStatus,
+      });
+
+      const task = tasks.find(t => t.id === taskId);
+      if (task && task.createdBy !== currentUser?.uid) {
+        await createNotification(
+          task.createdBy,
+          'Task Status Updated',
+          `${task.title} is now ${newStatus}`,
+          'task'
+        );
+      }
+
       fetchTasks();
-      setTimeout(() => setSuccess(''), 2000);
     } catch (error) {
       console.error('Error updating status:', error);
       setError('Failed to update status');
-      setTimeout(() => setError(''), 2000);
     }
   };
 
-  const handleAddNote = async () => {
-    if (!selectedTask || !noteText.trim() || !currentUser) return;
+  // Send chat message
+  const handleSendComment = async () => {
+    if (!selectedTask || !newComment.trim() || !currentUser) return;
 
+    setSendingMessage(true);
     try {
-      const newNote = {
-        text: noteText.trim(),
-        author: currentUser.uid,
-        authorName: userData?.displayName || 'User',
+      await addDoc(collection(db, 'taskComments'), {
+        taskId: selectedTask.id,
+        message: newComment.trim(),
+        sentBy: currentUser.uid,
+        sentByName: userData?.displayName || 'Unknown',
+        sentByRole: userRole,
         timestamp: Timestamp.now(),
-      };
-
-      await updateDoc(doc(db, 'tasks', selectedTask.id), {
-        notes: arrayUnion(newNote),
       });
 
-      // Notify the task creator about the note
-      if (selectedTask.assignedBy !== currentUser.uid) {
+      // Notify task creator and assignee
+      const notifyUsers = [selectedTask.createdBy, selectedTask.assignedTo].filter(
+        uid => uid !== currentUser.uid
+      );
+
+      for (const uid of notifyUsers) {
         await createNotification(
-          selectedTask.assignedBy,
-          'New Task Note 💬',
-          `${userData?.displayName} added a note to: ${selectedTask.title}`,
+          uid,
+          `New comment on: ${selectedTask.title}`,
+          `${userData?.displayName}: ${newComment.slice(0, 50)}...`,
           'task'
         );
       }
 
-      // Notify the assigned person if note is from task creator
-      if (selectedTask.assignedTo !== currentUser.uid && userRole !== 'member') {
-        await createNotification(
-          selectedTask.assignedTo,
-          'Task Update 💬',
-          `${userData?.displayName} added a note to: ${selectedTask.title}`,
-          'task'
-        );
-      }
-
-      setNoteText('');
-      setSuccess('Note added successfully!');
-      fetchTasks();
-      setTimeout(() => setSuccess(''), 2000);
+      setNewComment('');
+      fetchTasks(); // Update comment count
     } catch (error) {
-      console.error('Error adding note:', error);
-      setError('Failed to add note');
-      setTimeout(() => setError(''), 2000);
+      console.error('Error sending comment:', error);
+      setError('Failed to send message');
+    } finally {
+      setSendingMessage(false);
     }
+  };
+
+  const openChatModal = (task: Task) => {
+    setSelectedTask(task);
+    setShowChatModal(true);
   };
 
   const resetForm = () => {
     setFormData({
       title: '',
       description: '',
-      assignedTo: '',
-      priority: 'medium',
-      dueDate: '',
       status: 'pending',
+      priority: 'medium',
+      assignedTo: '',
+      dueDate: '',
     });
   };
 
@@ -289,80 +349,69 @@ export const Tasks = () => {
     setFormData({
       title: task.title,
       description: task.description,
-      assignedTo: task.assignedTo,
-      priority: task.priority,
-      dueDate: task.dueDate.toISOString().split('T')[0],
       status: task.status,
+      priority: task.priority,
+      assignedTo: task.assignedTo,
+      dueDate: task.dueDate.toISOString().split('T')[0],
     });
     setShowModal(true);
   };
 
-  const openNotesModal = (task: Task) => {
-    setSelectedTask(task);
-    setShowNotesModal(true);
-    setNoteText('');
-  };
+  const filteredTasks = tasks.filter(task => {
+    const matchesSearch = task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         task.description.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesStatus = filterStatus === 'all' || task.status === filterStatus;
+    const matchesPriority = filterPriority === 'all' || task.priority === filterPriority;
+    
+    return matchesSearch && matchesStatus && matchesPriority;
+  });
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
-      case 'high': return 'bg-red-100 text-red-700';
-      case 'medium': return 'bg-yellow-100 text-yellow-700';
-      case 'low': return 'bg-green-100 text-green-700';
-      default: return 'bg-gray-100 text-gray-700';
+      case 'high': return 'bg-red-100 text-red-700 border-red-200';
+      case 'medium': return 'bg-yellow-100 text-yellow-700 border-yellow-200';
+      case 'low': return 'bg-green-100 text-green-700 border-green-200';
+      default: return 'bg-gray-100 text-gray-700 border-gray-200';
     }
   };
 
-  const getStatusColor = (status: string) => {
+  const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'completed': return 'bg-green-100 text-green-700';
-      case 'in-progress': return 'bg-blue-100 text-blue-700';
-      case 'pending': return 'bg-gray-100 text-gray-700';
-      default: return 'bg-gray-100 text-gray-700';
+      case 'completed': return <CheckCircle className="h-5 w-5 text-green-600" />;
+      case 'in-progress': return <Clock className="h-5 w-5 text-blue-600" />;
+      case 'pending': return <AlertCircle className="h-5 w-5 text-gray-600" />;
+      default: return <Clock className="h-5 w-5 text-gray-600" />;
     }
   };
 
+  // Updated permission check - Only Super Admin can edit/delete
   const canEditTask = (task: Task) => {
-    // Only SuperAdmin and Admin can edit task details
-    return userRole === 'superadmin' || userRole === 'admin';
+    return userRole === 'superadmin';
   };
 
-  const canDeleteTask = (task: Task) => {
-    return userRole === 'superadmin' || userRole === 'admin';
+  const getRoleBadgeColor = (role: string) => {
+    switch (role) {
+      case 'superadmin': return 'bg-red-100 text-red-700';
+      case 'admin': return 'bg-yellow-100 text-yellow-700';
+      case 'member': return 'bg-blue-100 text-blue-700';
+      default: return 'bg-gray-100 text-gray-700';
+    }
   };
-
-  const filteredTasks = filterStatus === 'all' 
-    ? tasks 
-    : tasks.filter(t => t.status === filterStatus);
 
   return (
     <div>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Tasks</h1>
-          <p className="text-gray-600 mt-1">
-            {userRole === 'member' 
-              ? 'View and update your assigned tasks' 
-              : 'Manage and track team tasks'}
-          </p>
+          <p className="text-gray-600 mt-1">Manage and track your team's tasks</p>
         </div>
-        <div className="flex items-center space-x-3">
-          <select
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-          >
-            <option value="all">All Tasks</option>
-            <option value="pending">Pending</option>
-            <option value="in-progress">In Progress</option>
-            <option value="completed">Completed</option>
-          </select>
-          {(userRole === 'superadmin' || userRole === 'admin') && (
-            <button onClick={() => setShowModal(true)} className="btn-primary flex items-center">
-              <Plus className="h-5 w-5 mr-2" />
-              New Task
-            </button>
-          )}
-        </div>
+        {/* Only Super Admin and Admin can create tasks */}
+        {(userRole === 'superadmin' || userRole === 'admin') && (
+          <button onClick={() => setShowModal(true)} className="btn-primary flex items-center">
+            <Plus className="h-5 w-5 mr-2" />
+            Create Task
+          </button>
+        )}
       </div>
 
       {success && (
@@ -377,96 +426,124 @@ export const Tasks = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredTasks.map((task) => (
-          <div key={task.id} className="card hover:shadow-md transition-shadow">
-            <div className="flex items-start justify-between mb-3">
-              <h3 className="font-semibold text-gray-900 flex-1">{task.title}</h3>
-              <span className={`px-2 py-1 rounded-full text-xs font-medium ${getPriorityColor(task.priority)} ml-2 flex-shrink-0`}>
-                {task.priority}
-              </span>
-            </div>
-            
-            <p className="text-sm text-gray-600 mb-4 line-clamp-2">{task.description}</p>
-            
-            <div className="space-y-2 mb-4">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-500">Assigned to:</span>
-                <span className="font-medium text-gray-900">{task.assignedToName}</span>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-500">Assigned by:</span>
-                <span className="font-medium text-gray-900">{task.assignedByName || 'N/A'}</span>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-500">Due date:</span>
-                <span className="font-medium text-gray-900">
-                  {task.dueDate.toLocaleDateString()}
-                </span>
-              </div>
-              {task.notes && task.notes.length > 0 && (
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-gray-500">Notes:</span>
-                  <span className="font-medium text-primary-600">{task.notes.length} message{task.notes.length > 1 ? 's' : ''}</span>
-                </div>
-              )}
-            </div>
+      {/* Filters */}
+      <div className="card mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search tasks..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+            />
+          </div>
 
-            <div className="flex items-center justify-between pt-4 border-t border-gray-100">
-              {/* Status dropdown for members on their own tasks */}
-              {userRole === 'member' && task.assignedTo === currentUser?.uid ? (
-                <select
-                  value={task.status}
-                  onChange={(e) => handleQuickStatusUpdate(task.id, e.target.value as any)}
-                  className={`text-xs font-medium px-3 py-1.5 rounded-lg ${getStatusColor(task.status)} border-0 cursor-pointer focus:ring-2 focus:ring-primary-500`}
-                >
-                  <option value="pending">Pending</option>
-                  <option value="in-progress">In Progress</option>
-                  <option value="completed">Completed</option>
-                </select>
-              ) : (
-                <span className={`px-3 py-1.5 rounded-lg text-xs font-medium ${getStatusColor(task.status)}`}>
-                  {task.status}
-                </span>
-              )}
-              
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+            className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <option value="all">All Status</option>
+            <option value="pending">Pending</option>
+            <option value="in-progress">In Progress</option>
+            <option value="completed">Completed</option>
+          </select>
+
+          <select
+            value={filterPriority}
+            onChange={(e) => setFilterPriority(e.target.value)}
+            className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <option value="all">All Priority</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Tasks Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+        {filteredTasks.map((task) => (
+          <div key={task.id} className="card hover:shadow-lg transition-shadow">
+            <div className="flex items-start justify-between mb-3">
               <div className="flex items-center space-x-2">
-                {/* Notes button - visible to all */}
+                {getStatusIcon(task.status)}
+                <span className={`px-3 py-1 rounded-full text-xs font-medium border ${getPriorityColor(task.priority)}`}>
+                  {task.priority}
+                </span>
+              </div>
+              <div className="flex items-center space-x-1">
+                {/* Chat Button - Everyone can chat */}
                 <button
-                  onClick={() => openNotesModal(task)}
-                  className="p-1.5 text-primary-600 hover:bg-primary-50 rounded transition-colors relative"
-                  title="View/Add notes"
+                  onClick={() => openChatModal(task)}
+                  className="relative p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                  title="View discussion"
                 >
-                  <MessageSquare className="h-4 w-4" />
-                  {task.notes && task.notes.length > 0 && (
-                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-4 w-4 flex items-center justify-center">
-                      {task.notes.length}
+                  <MessageCircle className="h-4 w-4" />
+                  {task.commentsCount! > 0 && (
+                    <span className="absolute -top-1 -right-1 h-4 w-4 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
+                      {task.commentsCount}
                     </span>
                   )}
                 </button>
                 
-                {/* Edit button - only for admin/superadmin */}
+                {/* Edit/Delete - Only Super Admin */}
                 {canEditTask(task) && (
-                  <button
-                    onClick={() => openEditModal(task)}
-                    className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                    title="Edit task"
-                  >
-                    <Edit2 className="h-4 w-4" />
-                  </button>
-                )}
-                
-                {/* Delete button - only for admin/superadmin */}
-                {canDeleteTask(task) && (
-                  <button
-                    onClick={() => handleDeleteTask(task.id)}
-                    className="p-1.5 text-red-600 hover:bg-red-50 rounded transition-colors"
-                    title="Delete task"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                  <>
+                    <button
+                      onClick={() => openEditModal(task)}
+                      className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                      title="Edit task"
+                    >
+                      <Edit2 className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteTask(task.id)}
+                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      title="Delete task"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </>
                 )}
               </div>
+            </div>
+
+            <h3 className="font-semibold text-lg text-gray-900 mb-2">{task.title}</h3>
+            <p className="text-sm text-gray-600 mb-4 line-clamp-2">{task.description}</p>
+
+            <div className="space-y-2 mb-4 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-gray-600">Assigned to:</span>
+                <span className="font-medium text-gray-900">{task.assignedToName}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-gray-600">Due date:</span>
+                <span className="font-medium text-gray-900">{format(task.dueDate, 'MMM d, yyyy')}</span>
+              </div>
+              {task.createdByName && (
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-600">Created by:</span>
+                  <span className="font-medium text-gray-900">{task.createdByName}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Status Change - Everyone can update status */}
+            <div className="pt-4 border-t border-gray-100">
+              <label className="block text-xs font-medium text-gray-700 mb-2">Update Status:</label>
+              <select
+                value={task.status}
+                onChange={(e) => handleStatusChange(task.id, e.target.value as any)}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+              >
+                <option value="pending">Pending</option>
+                <option value="in-progress">In Progress</option>
+                <option value="completed">Completed</option>
+              </select>
             </div>
           </div>
         ))}
@@ -474,11 +551,11 @@ export const Tasks = () => {
 
       {filteredTasks.length === 0 && (
         <div className="card text-center py-12">
-          <CheckCircle className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+          <CheckCircle className="h-12 w-12 text-gray-300 mx-auto mb-4" />
           <p className="text-gray-500">
-            {filterStatus === 'all' ? 'No tasks found' : `No ${filterStatus} tasks`}
+            {tasks.length === 0 ? 'No tasks assigned to you yet' : 'No tasks match your filters'}
           </p>
-          {(userRole === 'superadmin' || userRole === 'admin') && filterStatus === 'all' && (
+          {(userRole === 'superadmin' || userRole === 'admin') && tasks.length === 0 && (
             <button onClick={() => setShowModal(true)} className="mt-4 text-primary-600 font-medium">
               Create your first task
             </button>
@@ -486,8 +563,8 @@ export const Tasks = () => {
         </div>
       )}
 
-      {/* Create/Edit Task Modal */}
-      {showModal && (
+      {/* Create/Edit Task Modal - Only for Super Admin and Admin */}
+      {showModal && (userRole === 'superadmin' || userRole === 'admin') && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
             <h2 className="text-2xl font-bold text-gray-900 mb-6">
@@ -529,31 +606,29 @@ export const Tasks = () => {
                 />
               </div>
 
-              {userRole !== 'member' && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Assign To *
-                  </label>
-                  <select
-                    value={formData.assignedTo}
-                    onChange={(e) => setFormData({ ...formData, assignedTo: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                    disabled={loading}
-                  >
-                    <option value="">Select a team member</option>
-                    {users.map((user) => (
-                      <option key={user.uid} value={user.uid}>
-                        {user.displayName} ({user.role})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Assign To *
+                </label>
+                <select
+                  value={formData.assignedTo}
+                  onChange={(e) => setFormData({ ...formData, assignedTo: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  disabled={loading}
+                >
+                  <option value="">Select team member</option>
+                  {users.map((user) => (
+                    <option key={user.uid} value={user.uid}>
+                      {user.displayName} ({user.role})
+                    </option>
+                  ))}
+                </select>
+              </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Priority
+                    Priority *
                   </label>
                   <select
                     value={formData.priority}
@@ -567,23 +642,21 @@ export const Tasks = () => {
                   </select>
                 </div>
 
-                {editingTask && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Status
-                    </label>
-                    <select
-                      value={formData.status}
-                      onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                      disabled={loading}
-                    >
-                      <option value="pending">Pending</option>
-                      <option value="in-progress">In Progress</option>
-                      <option value="completed">Completed</option>
-                    </select>
-                  </div>
-                )}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Status *
+                  </label>
+                  <select
+                    value={formData.status}
+                    onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    disabled={loading}
+                  >
+                    <option value="pending">Pending</option>
+                    <option value="in-progress">In Progress</option>
+                    <option value="completed">Completed</option>
+                  </select>
+                </div>
               </div>
 
               <div>
@@ -617,7 +690,7 @@ export const Tasks = () => {
               <button
                 onClick={editingTask ? handleUpdateTask : handleCreateTask}
                 className="flex-1 btn-primary disabled:opacity-50"
-                disabled={loading || !formData.title || (!editingTask && !formData.assignedTo) || !formData.dueDate}
+                disabled={loading || !formData.title || !formData.assignedTo || !formData.dueDate}
               >
                 {loading ? 'Saving...' : editingTask ? 'Update Task' : 'Create Task'}
               </button>
@@ -626,77 +699,101 @@ export const Tasks = () => {
         </div>
       )}
 
-      {/* Notes Modal */}
-      {showNotesModal && selectedTask && (
+      {/* Chat Modal - Everyone can access */}
+      {showChatModal && selectedTask && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-hidden flex flex-col">
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">
-              Task Notes
-            </h2>
-            <p className="text-sm text-gray-600 mb-4">{selectedTask.title}</p>
+          <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full h-[600px] flex flex-col">
+            {/* Chat Header */}
+            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+              <div className="flex-1">
+                <h2 className="text-lg font-bold text-gray-900">{selectedTask.title}</h2>
+                <p className="text-sm text-gray-500">Task Discussion</p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowChatModal(false);
+                  setSelectedTask(null);
+                  setComments([]);
+                }}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="h-5 w-5 text-gray-600" />
+              </button>
+            </div>
 
-            {/* Notes list */}
-            <div className="flex-1 overflow-y-auto mb-4 space-y-3 max-h-96">
-              {selectedTask.notes && selectedTask.notes.length > 0 ? (
-                selectedTask.notes.map((note, index) => (
-                  <div
-                    key={index}
-                    className={`p-4 rounded-lg ${
-                      note.author === currentUser?.uid
-                        ? 'bg-primary-50 ml-8'
-                        : 'bg-gray-50 mr-8'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-semibold text-sm text-gray-900">
-                        {note.authorName}
-                      </span>
-                      <span className="text-xs text-gray-500">
-                        {note.timestamp.toLocaleString()}
-                      </span>
-                    </div>
-                    <p className="text-sm text-gray-700">{note.text}</p>
-                  </div>
-                ))
-              ) : (
-                <div className="text-center py-8 text-gray-500">
-                  <MessageSquare className="h-12 w-12 mx-auto mb-3 text-gray-300" />
-                  <p>No notes yet. Start the conversation!</p>
+            {/* Messages Area */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {comments.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-gray-400">
+                  <MessageCircle className="h-12 w-12 mb-2" />
+                  <p className="text-sm">No messages yet. Start the discussion!</p>
                 </div>
+              ) : (
+                comments.map((comment) => {
+                  const isCurrentUser = comment.sentBy === currentUser?.uid;
+                  
+                  return (
+                    <div
+                      key={comment.id}
+                      className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}
+                    >
+                      <div className={`max-w-[70%] ${isCurrentUser ? 'order-2' : 'order-1'}`}>
+                        <div className="flex items-center space-x-2 mb-1">
+                          <span className="text-xs font-medium text-gray-900">
+                            {comment.sentByName}
+                          </span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${getRoleBadgeColor(comment.sentByRole)}`}>
+                            {comment.sentByRole}
+                          </span>
+                        </div>
+                        <div
+                          className={`rounded-lg p-3 ${
+                            isCurrentUser
+                              ? 'bg-primary-600 text-white'
+                              : 'bg-gray-100 text-gray-900'
+                          }`}
+                        >
+                          <p className="text-sm whitespace-pre-wrap break-words">{comment.message}</p>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">
+                          {format(comment.timestamp, 'MMM d, h:mm a')}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })
               )}
             </div>
 
-            {/* Add note input */}
-            <div className="border-t pt-4">
-              <div className="flex space-x-2">
-                <input
-                  type="text"
-                  value={noteText}
-                  onChange={(e) => setNoteText(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && handleAddNote()}
-                  placeholder="Add a note (progress update, feedback, etc.)"
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+            {/* Input Area */}
+            <div className="p-4 border-t border-gray-200">
+              <div className="flex items-end space-x-2">
+                <textarea
+                  value={newComment}
+                  onChange={(e) => setNewComment(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendComment();
+                    }
+                  }}
+                  placeholder="Type your message... (Shift+Enter for new line)"
+                  rows={2}
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
+                  disabled={sendingMessage}
                 />
                 <button
-                  onClick={handleAddNote}
-                  disabled={!noteText.trim()}
-                  className="btn-primary px-4 py-2 disabled:opacity-50"
+                  onClick={handleSendComment}
+                  disabled={!newComment.trim() || sendingMessage}
+                  className="p-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   <Send className="h-5 w-5" />
                 </button>
               </div>
+              <p className="text-xs text-gray-500 mt-2">
+                Press Enter to send, Shift+Enter for new line
+              </p>
             </div>
-
-            <button
-              onClick={() => {
-                setShowNotesModal(false);
-                setSelectedTask(null);
-                setNoteText('');
-              }}
-              className="w-full mt-4 btn-secondary"
-            >
-              Close
-            </button>
           </div>
         </div>
       )}
