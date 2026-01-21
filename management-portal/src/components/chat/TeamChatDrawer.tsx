@@ -48,11 +48,22 @@ export const TeamChatDrawer = ({
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
+  const [isVisible, setIsVisible] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isSuperAdmin = userData?.role === "superadmin";
+
+  // Handle drawer animation on open/close
+  useEffect(() => {
+    if (open) {
+      // Trigger animation after mount
+      setTimeout(() => setIsVisible(true), 10);
+    } else {
+      setIsVisible(false);
+    }
+  }, [open]);
 
   // Real-time listener for messages
   useEffect(() => {
@@ -127,7 +138,7 @@ export const TeamChatDrawer = ({
   // Focus textarea when drawer opens
   useEffect(() => {
     if (open && textareaRef.current) {
-      setTimeout(() => textareaRef.current?.focus(), 100);
+      setTimeout(() => textareaRef.current?.focus(), 300);
     }
   }, [open]);
 
@@ -231,86 +242,112 @@ export const TeamChatDrawer = ({
     }
   };
 
+  const handleClose = () => {
+    setIsVisible(false);
+    setTimeout(onClose, 250); // Wait for animation to finish
+  };
+
   if (!open) return null;
 
   return (
     <>
-      {/* Overlay */}
-      <div className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
+      {/* Overlay with fade animation */}
+      <div 
+        className={`fixed inset-0 bg-black/30 z-40 transition-opacity duration-300 ${
+          isVisible ? 'opacity-100' : 'opacity-0'
+        }`}
+        onClick={handleClose}
+      />
 
-      {/* Drawer - NO HORIZONTAL SCROLL */}
-      <div className="fixed top-0 right-0 h-full w-full sm:w-[420px] bg-white z-50 shadow-2xl flex flex-col overflow-x-hidden">
-        {/* Header - Minimal */}
-        <div className="h-14 px-4 border-b flex items-center justify-between flex-shrink-0 bg-primary-600">
+      {/* Drawer with slide-in animation */}
+      <div 
+        className={`fixed top-0 right-0 h-full w-full sm:w-[420px] md:w-[440px] bg-white z-50 shadow-2xl flex flex-col overflow-x-hidden transition-transform duration-300 ease-out ${
+          isVisible ? 'translate-x-0' : 'translate-x-full'
+        }`}
+      >
+        {/* Header - Minimal & Mobile Optimized */}
+        <div className="h-14 sm:h-16 px-3 sm:px-4 border-b flex items-center justify-between flex-shrink-0 bg-gradient-to-r from-primary-600 to-primary-700 shadow-md">
           <div className="flex items-center gap-2 text-white">
-            <MessageCircle className="h-5 w-5" />
-            <span className="font-semibold">Team Chat</span>
+            <MessageCircle className="h-5 w-5 sm:h-6 sm:w-6" />
+            <div>
+              <span className="font-semibold text-sm sm:text-base">Team Chat</span>
+              {messages.length > 0 && (
+                <p className="text-[10px] sm:text-xs opacity-90">{messages.length} messages</p>
+              )}
+            </div>
           </div>
           <button
-            onClick={onClose}
-            className="p-1.5 rounded hover:bg-white/20 transition text-white"
+            onClick={handleClose}
+            className="p-1.5 sm:p-2 rounded-lg hover:bg-white/20 active:bg-white/30 transition text-white"
+            aria-label="Close chat"
           >
-            <X className="h-5 w-5" />
+            <X className="h-5 w-5 sm:h-6 sm:w-6" />
           </button>
         </div>
 
-        {/* Messages Area */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden p-3 space-y-2 bg-gray-50">
+        {/* Messages Area - Mobile Optimized */}
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 sm:p-3 space-y-2 bg-gray-50">
           {messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-gray-400">
-              <MessageCircle className="h-12 w-12 mb-2 opacity-40" />
-              <p className="text-sm">No messages yet</p>
+            <div className="flex flex-col items-center justify-center h-full text-gray-400 px-4">
+              <MessageCircle className="h-12 w-12 sm:h-16 sm:w-16 mb-2 sm:mb-3 opacity-40 animate-pulse" />
+              <p className="text-sm sm:text-base font-medium">No messages yet</p>
+              <p className="text-xs sm:text-sm mt-1 text-center">Start the conversation!</p>
             </div>
           ) : (
-            messages.map((m) => {
+            messages.map((m, index) => {
               const mine = m.senderId === currentUser?.uid;
-              // User can delete if: it's their own message OR they're superadmin
               const canDelete = mine || isSuperAdmin;
               
               return (
                 <div
                   key={m.id}
-                  className={`flex ${mine ? "justify-end" : "justify-start"} gap-2`}
+                  className={`flex ${mine ? "justify-end" : "justify-start"} gap-1.5 sm:gap-2 animate-fadeIn`}
+                  style={{ animationDelay: `${index * 0.02}s` }}
                 >
-                  <div className={`max-w-[75%] ${mine ? "items-end" : "items-start"} flex flex-col`}>
-                    {/* Sender Info - DEPARTMENT SHOWN HERE */}
+                  <div className={`max-w-[78%] sm:max-w-[75%] ${mine ? "items-end" : "items-start"} flex flex-col`}>
+                    {/* Sender Info - Mobile Optimized */}
                     {!mine && (
-                      <div className="flex items-center gap-1.5 mb-0.5 text-xs px-1">
-                        <span className="font-semibold text-gray-700">{m.senderName}</span>
+                      <div className="flex items-center gap-1 sm:gap-1.5 mb-0.5 text-[10px] sm:text-xs px-1">
+                        <span className="font-semibold text-gray-700 truncate max-w-[120px] sm:max-w-none">
+                          {m.senderName}
+                        </span>
                         {m.senderDepartment && (
                           <>
                             <span className="text-gray-400">•</span>
-                            <span className="text-gray-500">{m.senderDepartment}</span>
+                            <span className="text-gray-500 truncate max-w-[80px] sm:max-w-none">
+                              {m.senderDepartment}
+                            </span>
                           </>
                         )}
                       </div>
                     )}
 
-                    {/* Message Bubble */}
+                    {/* Message Bubble - Enhanced */}
                     <div
-                      className={`rounded-xl px-3 py-2 text-sm break-words whitespace-pre-wrap ${
+                      className={`rounded-2xl px-2.5 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm break-words whitespace-pre-wrap shadow-sm transition-all duration-200 hover:shadow-md ${
                         mine
-                          ? "bg-primary-600 text-white"
-                          : "bg-white text-gray-800 border border-gray-200"
+                          ? "bg-primary-600 text-white rounded-tr-md"
+                          : "bg-white text-gray-800 border border-gray-200 rounded-tl-md"
                       }`}
                     >
                       {m.text}
                     </div>
 
                     {/* Time */}
-                    <span className="text-[10px] text-gray-400 mt-0.5 px-1">
+                    <span className="text-[9px] sm:text-[10px] text-gray-400 mt-0.5 px-1">
                       {m.createdAt ? format(m.createdAt, "h:mm a") : "..."}
                     </span>
                   </div>
 
-                  {/* Delete Button - ALWAYS VISIBLE for own messages or superadmin */}
+                  {/* Delete Button - Touch Optimized */}
                   {canDelete && (
                     <button
                       onClick={() => deleteMessage(m.id, mine)}
-                      className="self-center p-1.5 rounded hover:bg-red-50 text-red-500 transition opacity-60 hover:opacity-100"
+                      className="self-center p-1.5 sm:p-2 rounded-lg hover:bg-red-50 active:bg-red-100 text-red-500 transition-all duration-200 opacity-60 hover:opacity-100 active:scale-95"
                       title={mine ? "Delete your message" : "Delete message (Admin)"}
+                      aria-label="Delete message"
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
+                      <Trash2 className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
                     </button>
                   )}
                 </div>
@@ -320,15 +357,15 @@ export const TeamChatDrawer = ({
           <div ref={bottomRef} />
         </div>
 
-        {/* Typing Indicator */}
+        {/* Typing Indicator - Animated */}
         {typingUsers.length > 0 && (
-          <div className="px-4 py-1.5 bg-gray-50 border-t text-xs text-gray-500 flex items-center gap-2">
-            <div className="flex gap-0.5">
-              <span className="w-1 h-1 bg-primary-600 rounded-full animate-bounce" style={{ animationDelay: "0ms" }}></span>
-              <span className="w-1 h-1 bg-primary-600 rounded-full animate-bounce" style={{ animationDelay: "150ms" }}></span>
-              <span className="w-1 h-1 bg-primary-600 rounded-full animate-bounce" style={{ animationDelay: "300ms" }}></span>
+          <div className="px-3 sm:px-4 py-1.5 sm:py-2 bg-gray-50 border-t text-[10px] sm:text-xs text-gray-600 flex items-center gap-2 animate-fadeIn">
+            <div className="flex gap-0.5 sm:gap-1">
+              <span className="w-1 h-1 sm:w-1.5 sm:h-1.5 bg-primary-600 rounded-full animate-bounce" style={{ animationDelay: "0ms" }}></span>
+              <span className="w-1 h-1 sm:w-1.5 sm:h-1.5 bg-primary-600 rounded-full animate-bounce" style={{ animationDelay: "150ms" }}></span>
+              <span className="w-1 h-1 sm:w-1.5 sm:h-1.5 bg-primary-600 rounded-full animate-bounce" style={{ animationDelay: "300ms" }}></span>
             </div>
-            <span>
+            <span className="truncate">
               {typingUsers.length === 1
                 ? `${typingUsers[0].userName} is typing...`
                 : `${typingUsers.length} people typing...`}
@@ -336,33 +373,79 @@ export const TeamChatDrawer = ({
           </div>
         )}
 
-        {/* Input - Minimal */}
-        <div className="p-3 border-t flex-shrink-0 bg-white">
-          <div className="flex items-end gap-2">
+        {/* Input - Mobile Optimized */}
+        <div className="p-2 sm:p-3 border-t flex-shrink-0 bg-white safe-area-bottom">
+          <div className="flex items-end gap-1.5 sm:gap-2">
             <textarea
               ref={textareaRef}
               rows={1}
               value={text}
               onChange={handleTextChange}
               onKeyDown={handleKeyDown}
-              placeholder="Message..."
-              className="flex-1 resize-none px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 text-sm"
+              placeholder="Type a message..."
+              className="flex-1 resize-none px-3 py-2 sm:py-2.5 border border-gray-300 rounded-lg sm:rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-xs sm:text-sm transition-all duration-200"
               disabled={sending}
+              maxLength={1000}
             />
             <button
               onClick={send}
               disabled={sending || !text.trim()}
-              className="p-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition active:scale-95"
+              className="p-2 sm:p-2.5 bg-primary-600 text-white rounded-lg sm:rounded-xl hover:bg-primary-700 active:bg-primary-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 active:scale-95 shadow-md hover:shadow-lg"
+              aria-label="Send message"
             >
               {sending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="h-4 w-4 sm:h-5 sm:w-5 animate-spin" />
               ) : (
-                <Send className="h-4 w-4" />
+                <Send className="h-4 w-4 sm:h-5 sm:w-5" />
               )}
             </button>
           </div>
         </div>
       </div>
+
+      {/* Add custom CSS animations */}
+      <style>{`
+        @keyframes fadeIn {
+          from {
+            opacity: 0;
+            transform: translateY(10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
+        .animate-fadeIn {
+          animation: fadeIn 0.3s ease-out forwards;
+        }
+
+        /* Safe area for mobile notches */
+        .safe-area-bottom {
+          padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+        }
+
+        /* Smooth scroll for messages */
+        .overflow-y-auto {
+          scroll-behavior: smooth;
+          -webkit-overflow-scrolling: touch;
+        }
+
+        /* Better mobile textarea */
+        textarea {
+          -webkit-appearance: none;
+          -moz-appearance: none;
+          appearance: none;
+        }
+
+        /* Prevent zoom on iOS */
+        @media screen and (max-width: 640px) {
+          input[type="text"],
+          textarea {
+            font-size: 16px !important;
+          }
+        }
+      `}</style>
     </>
   );
 };
