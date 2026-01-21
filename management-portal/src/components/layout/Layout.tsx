@@ -60,6 +60,8 @@ export const Layout = ({ children }: LayoutProps) => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [chatOpen, setChatOpen] = useState(false);
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
+  const [lastReadChatTime, setLastReadChatTime] = useState<Date>(new Date());
 
 
   // Real-time notifications listener
@@ -89,6 +91,30 @@ export const Layout = ({ children }: LayoutProps) => {
 
     return () => unsubscribe();
   }, [currentUser]);
+
+
+  // Real-time chat messages listener for unread count
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const chatRef = collection(db, 'teamChatMessages');
+    const q = query(chatRef, orderBy('createdAt', 'desc'), limit(50));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      // Count messages after last read time that are not from current user
+      const unreadMessages = snapshot.docs.filter((doc) => {
+        const data = doc.data();
+        const messageTime = data.createdAt?.toDate?.();
+        const isNotMine = data.senderId !== currentUser.uid;
+        const isAfterLastRead = messageTime && messageTime > lastReadChatTime;
+        return isNotMine && isAfterLastRead;
+      });
+
+      setUnreadChatCount(unreadMessages.length);
+    });
+
+    return () => unsubscribe();
+  }, [currentUser, lastReadChatTime]);
 
 
   const handleLogout = async () => {
@@ -127,6 +153,12 @@ export const Layout = ({ children }: LayoutProps) => {
     } catch (error) {
       console.error('Error marking all as read:', error);
     }
+  };
+
+
+  const markChatAsRead = () => {
+    setLastReadChatTime(new Date());
+    setUnreadChatCount(0);
   };
 
 
@@ -200,7 +232,6 @@ export const Layout = ({ children }: LayoutProps) => {
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
-      {/* Mobile Menu Overlay */}
       {isMobileMenuOpen && (
         <div
           className="lg:hidden fixed inset-0 bg-black bg-opacity-50 z-40"
@@ -209,7 +240,6 @@ export const Layout = ({ children }: LayoutProps) => {
       )}
 
 
-      {/* Notification Overlay */}
       {isNotificationOpen && (
         <div
           className="fixed inset-0 z-40"
@@ -218,7 +248,6 @@ export const Layout = ({ children }: LayoutProps) => {
       )}
 
 
-      {/* Sidebar - Desktop & Mobile */}
       <aside
         className={`
           fixed top-0 left-0 h-full bg-white border-r border-gray-200 transition-transform duration-300 ease-in-out
@@ -228,7 +257,6 @@ export const Layout = ({ children }: LayoutProps) => {
         `}
       >
         <div className="flex flex-col h-full">
-          {/* Sidebar Header */}
           <div className="h-16 flex items-center justify-between px-6 border-b border-gray-200 flex-shrink-0">
             <h1 className="text-xl font-bold text-primary-600">Manage eka</h1>
             <button
@@ -240,7 +268,6 @@ export const Layout = ({ children }: LayoutProps) => {
           </div>
 
 
-          {/* Navigation */}
           <nav className="py-6 px-3 border-b border-gray-200">
             <div className="space-y-1">
               {navItems.map((item) => {
@@ -266,20 +293,25 @@ export const Layout = ({ children }: LayoutProps) => {
                 );
               })}
 
-              {/* Team Chat Button */}
+              {/* Team Chat Button with Badge */}
               <button
                 onClick={() => {
                   setChatOpen(true);
                   closeMobileMenu();
                 }}
-                className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-gray-700 hover:bg-gray-50 transition-all"
+                className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-gray-700 hover:bg-gray-50 transition-all relative"
               >
                 <MessageCircle className="h-5 w-5" />
                 <span>Team Chat</span>
+                {unreadChatCount > 0 && (
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 bg-red-500 text-white text-xs font-semibold rounded-full flex items-center justify-center">
+                    {unreadChatCount > 9 ? '9+' : unreadChatCount}
+                  </span>
+                )}
               </button>
             </div>
           </nav>
-          {/* User Profile & Logout */}
+
           <div className="border-t border-gray-200 p-4 flex-shrink-0">
             <div className="flex items-center space-x-3 mb-3 px-2">
               <div className="h-10 w-10 rounded-full bg-primary-600 flex items-center justify-center flex-shrink-0">
@@ -312,9 +344,7 @@ export const Layout = ({ children }: LayoutProps) => {
       </aside>
 
 
-      {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-h-screen w-full lg:w-auto">
-        {/* Mobile Header */}
         <header className="lg:hidden fixed top-0 left-0 right-0 h-16 bg-white border-b border-gray-200 z-30 flex items-center justify-between px-4">
           <div className="flex items-center space-x-3">
             <button
@@ -330,9 +360,14 @@ export const Layout = ({ children }: LayoutProps) => {
           <div className="flex items-center space-x-3">
             <button
               onClick={() => setChatOpen(true)}
-              className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+              className="p-2 rounded-lg hover:bg-gray-100 transition-colors relative"
             >
               <MessageCircle className="h-5 w-5 text-gray-600" />
+              {unreadChatCount > 0 && (
+                <span className="absolute top-0 right-0 h-4 w-4 bg-red-500 text-white text-[10px] font-semibold rounded-full flex items-center justify-center">
+                  {unreadChatCount > 9 ? '9+' : unreadChatCount}
+                </span>
+              )}
             </button>
             <div className="relative">
               <button 
@@ -355,7 +390,6 @@ export const Layout = ({ children }: LayoutProps) => {
         </header>
 
 
-        {/* Desktop Header */}
         <header className="hidden lg:block sticky top-0 z-20 bg-white border-b border-gray-200 px-8 py-4 flex-shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex-1">
@@ -368,10 +402,15 @@ export const Layout = ({ children }: LayoutProps) => {
             <div className="flex items-center space-x-4">
               <button
                 onClick={() => setChatOpen(true)}
-                className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+                className="p-2 rounded-lg hover:bg-gray-100 transition-colors relative"
                 title="Team Chat"
               >
                 <MessageCircle className="h-5 w-5 text-gray-600" />
+                {unreadChatCount > 0 && (
+                  <span className="absolute -top-1 -right-1 h-5 w-5 bg-red-500 text-white text-xs font-semibold rounded-full flex items-center justify-center">
+                    {unreadChatCount > 9 ? '9+' : unreadChatCount}
+                  </span>
+                )}
               </button>
               <div className="relative">
                 <button 
@@ -395,10 +434,8 @@ export const Layout = ({ children }: LayoutProps) => {
         </header>
 
 
-        {/* Notification Dropdown */}
         {isNotificationOpen && (
           <div className="fixed top-16 right-4 lg:top-20 lg:right-8 w-96 max-w-[calc(100vw-2rem)] bg-white rounded-lg shadow-2xl border border-gray-200 z-50 max-h-[80vh] flex flex-col">
-            {/* Notification Header */}
             <div className="p-4 border-b border-gray-200 flex items-center justify-between">
               <h3 className="font-semibold text-gray-900 flex items-center space-x-2">
                 <Bell className="h-5 w-5" />
@@ -421,7 +458,6 @@ export const Layout = ({ children }: LayoutProps) => {
             </div>
 
 
-            {/* Notification List */}
             <div className="flex-1 overflow-y-auto">
               {notifications.length > 0 ? (
                 <div className="divide-y divide-gray-100">
@@ -472,7 +508,6 @@ export const Layout = ({ children }: LayoutProps) => {
               )}
             </div>
 
-            {/* Notification Footer */}
             {notifications.length > 0 && (
               <div className="p-3 border-t border-gray-200 text-center">
                 <button
@@ -490,14 +525,18 @@ export const Layout = ({ children }: LayoutProps) => {
         )}
 
 
-        {/* Page Content */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 mt-16 lg:mt-0 overflow-x-hidden">
           {children}
         </main>
       </div>
 
       {/* Team Chat Drawer */}
-      <TeamChatDrawer open={chatOpen} onClose={() => setChatOpen(false)} />
+      <TeamChatDrawer 
+        open={chatOpen} 
+        onClose={() => setChatOpen(false)}
+        unreadCount={unreadChatCount}
+        onMarkAsRead={markChatAsRead}
+      />
     </div>
   );
 };

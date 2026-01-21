@@ -39,7 +39,7 @@ export const Settings = () => {
       setSuccess('Profile updated successfully!');
       setTimeout(() => {
         setSuccess('');
-        window.location.reload(); // Refresh to update context
+        window.location.reload();
       }, 1500);
     } catch (err: any) {
       setError('Failed to update profile');
@@ -66,14 +66,11 @@ export const Settings = () => {
     setSuccess('');
 
     try {
-      // Re-authenticate user
       const credential = EmailAuthProvider.credential(
         currentUser.email,
         passwordData.currentPassword
       );
       await reauthenticateWithCredential(currentUser, credential);
-
-      // Update password
       await updatePassword(currentUser, passwordData.newPassword);
 
       setSuccess('Password changed successfully!');
@@ -115,7 +112,6 @@ export const Settings = () => {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Sidebar */}
         <div className="card space-y-1">
           <button
             onClick={() => setActiveTab('profile')}
@@ -141,7 +137,6 @@ export const Settings = () => {
           </button>
         </div>
 
-        {/* Content */}
         <div className="lg:col-span-3">
           {activeTab === 'profile' && (
             <div className="card">
