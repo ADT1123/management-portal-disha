@@ -14,6 +14,7 @@ import {
   Timestamp 
 } from 'firebase/firestore';
 import { db } from '../../config/firebase';
+import { TeamChatDrawer } from '../chat/TeamChatDrawer';
 import { 
   LayoutDashboard, 
   CheckSquare, 
@@ -29,12 +30,15 @@ import {
   Star,
   BellDot,
   Check,
-  CheckCheck
+  CheckCheck,
+  MessageCircle
 } from 'lucide-react';
+
 
 interface LayoutProps {
   children: React.ReactNode;
 }
+
 
 interface Notification {
   id: string;
@@ -46,6 +50,7 @@ interface Notification {
   userId: string;
 }
 
+
 export const Layout = ({ children }: LayoutProps) => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -54,10 +59,13 @@ export const Layout = ({ children }: LayoutProps) => {
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [chatOpen, setChatOpen] = useState(false);
+
 
   // Real-time notifications listener
   useEffect(() => {
     if (!currentUser?.uid) return;
+
 
     const notificationsRef = collection(db, 'notifications');
     const q = query(
@@ -67,18 +75,21 @@ export const Layout = ({ children }: LayoutProps) => {
       limit(10)
     );
 
+
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const notificationData = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       })) as Notification[];
-      
+
       setNotifications(notificationData);
       setUnreadCount(notificationData.filter(n => !n.read).length);
     });
 
+
     return () => unsubscribe();
   }, [currentUser]);
+
 
   const handleLogout = async () => {
     try {
@@ -89,9 +100,11 @@ export const Layout = ({ children }: LayoutProps) => {
     }
   };
 
+
   const closeMobileMenu = () => {
     setIsMobileMenuOpen(false);
   };
+
 
   const markAsRead = async (notificationId: string) => {
     try {
@@ -101,6 +114,7 @@ export const Layout = ({ children }: LayoutProps) => {
       console.error('Error marking notification as read:', error);
     }
   };
+
 
   const markAllAsRead = async () => {
     try {
@@ -115,6 +129,7 @@ export const Layout = ({ children }: LayoutProps) => {
     }
   };
 
+
   const getNotificationIcon = (type: string) => {
     switch (type) {
       case 'task': return <CheckSquare className="h-4 w-4" />;
@@ -124,6 +139,7 @@ export const Layout = ({ children }: LayoutProps) => {
       default: return <Bell className="h-4 w-4" />;
     }
   };
+
 
   const getNotificationColor = (type: string) => {
     switch (type) {
@@ -135,6 +151,7 @@ export const Layout = ({ children }: LayoutProps) => {
     }
   };
 
+
   const formatNotificationTime = (timestamp: Timestamp) => {
     const now = new Date();
     const notificationDate = timestamp.toDate();
@@ -143,12 +160,14 @@ export const Layout = ({ children }: LayoutProps) => {
     const diffHours = Math.floor(diffMs / 3600000);
     const diffDays = Math.floor(diffMs / 86400000);
 
+
     if (diffMins < 1) return 'Just now';
     if (diffMins < 60) return `${diffMins}m ago`;
     if (diffHours < 24) return `${diffHours}h ago`;
     if (diffDays < 7) return `${diffDays}d ago`;
     return notificationDate.toLocaleDateString();
   };
+
 
   const navItems = [
     { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
@@ -157,6 +176,7 @@ export const Layout = ({ children }: LayoutProps) => {
     { path: '/meetings', icon: Calendar, label: 'Meetings' },
     { path: '/settings', icon: Settings, label: 'Settings' },
   ];
+
 
   const getRankIcon = (index: number) => {
     switch (index) {
@@ -167,6 +187,7 @@ export const Layout = ({ children }: LayoutProps) => {
     }
   };
 
+
   const getRankColor = (index: number) => {
     switch (index) {
       case 0: return 'bg-yellow-50 border-yellow-200';
@@ -175,6 +196,7 @@ export const Layout = ({ children }: LayoutProps) => {
       default: return 'bg-white border-gray-100';
     }
   };
+
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
@@ -186,6 +208,7 @@ export const Layout = ({ children }: LayoutProps) => {
         />
       )}
 
+
       {/* Notification Overlay */}
       {isNotificationOpen && (
         <div
@@ -193,6 +216,7 @@ export const Layout = ({ children }: LayoutProps) => {
           onClick={() => setIsNotificationOpen(false)}
         />
       )}
+
 
       {/* Sidebar - Desktop & Mobile */}
       <aside
@@ -215,13 +239,14 @@ export const Layout = ({ children }: LayoutProps) => {
             </button>
           </div>
 
+
           {/* Navigation */}
           <nav className="py-6 px-3 border-b border-gray-200">
             <div className="space-y-1">
               {navItems.map((item) => {
                 const Icon = item.icon;
                 const isActive = location.pathname === item.path;
-                
+
                 return (
                   <Link
                     key={item.path}
@@ -240,6 +265,18 @@ export const Layout = ({ children }: LayoutProps) => {
                   </Link>
                 );
               })}
+
+              {/* Team Chat Button */}
+              <button
+                onClick={() => {
+                  setChatOpen(true);
+                  closeMobileMenu();
+                }}
+                className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-gray-700 hover:bg-gray-50 transition-all"
+              >
+                <MessageCircle className="h-5 w-5" />
+                <span>Team Chat</span>
+              </button>
             </div>
           </nav>
           {/* User Profile & Logout */}
@@ -259,7 +296,7 @@ export const Layout = ({ children }: LayoutProps) => {
                 </p>
               </div>
             </div>
-            
+
             <button
               onClick={() => {
                 handleLogout();
@@ -273,6 +310,7 @@ export const Layout = ({ children }: LayoutProps) => {
           </div>
         </div>
       </aside>
+
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-h-screen w-full lg:w-auto">
@@ -288,8 +326,14 @@ export const Layout = ({ children }: LayoutProps) => {
             </button>
             <h1 className="text-xl font-bold text-primary-600">Portal</h1>
           </div>
-          
+
           <div className="flex items-center space-x-3">
+            <button
+              onClick={() => setChatOpen(true)}
+              className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+            >
+              <MessageCircle className="h-5 w-5 text-gray-600" />
+            </button>
             <div className="relative">
               <button 
                 onClick={() => setIsNotificationOpen(!isNotificationOpen)}
@@ -310,6 +354,7 @@ export const Layout = ({ children }: LayoutProps) => {
           </div>
         </header>
 
+
         {/* Desktop Header */}
         <header className="hidden lg:block sticky top-0 z-20 bg-white border-b border-gray-200 px-8 py-4 flex-shrink-0">
           <div className="flex items-center justify-between">
@@ -321,6 +366,13 @@ export const Layout = ({ children }: LayoutProps) => {
               />
             </div>
             <div className="flex items-center space-x-4">
+              <button
+                onClick={() => setChatOpen(true)}
+                className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+                title="Team Chat"
+              >
+                <MessageCircle className="h-5 w-5 text-gray-600" />
+              </button>
               <div className="relative">
                 <button 
                   onClick={() => setIsNotificationOpen(!isNotificationOpen)}
@@ -341,6 +393,7 @@ export const Layout = ({ children }: LayoutProps) => {
             </div>
           </div>
         </header>
+
 
         {/* Notification Dropdown */}
         {isNotificationOpen && (
@@ -366,6 +419,7 @@ export const Layout = ({ children }: LayoutProps) => {
                 </button>
               )}
             </div>
+
 
             {/* Notification List */}
             <div className="flex-1 overflow-y-auto">
@@ -417,7 +471,7 @@ export const Layout = ({ children }: LayoutProps) => {
                 </div>
               )}
             </div>
-        ){'}'}
+
             {/* Notification Footer */}
             {notifications.length > 0 && (
               <div className="p-3 border-t border-gray-200 text-center">
@@ -435,11 +489,15 @@ export const Layout = ({ children }: LayoutProps) => {
           </div>
         )}
 
+
         {/* Page Content */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 mt-16 lg:mt-0 overflow-x-hidden">
           {children}
         </main>
       </div>
+
+      {/* Team Chat Drawer */}
+      <TeamChatDrawer open={chatOpen} onClose={() => setChatOpen(false)} />
     </div>
   );
 };
