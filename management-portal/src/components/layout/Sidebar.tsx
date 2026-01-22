@@ -4,7 +4,8 @@ import {
   CheckSquare, 
   Users, 
   Calendar, 
-  Settings, 
+  Settings,
+  BarChart3, // ✅ Add this import
   LogOut 
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
@@ -14,6 +15,7 @@ const navigation = [
   { name: 'Tasks', href: '/tasks', icon: CheckSquare, roles: ['superadmin', 'admin', 'member'] },
   { name: 'Team', href: '/team', icon: Users, roles: ['superadmin', 'admin'] },
   { name: 'Meetings', href: '/meetings', icon: Calendar, roles: ['superadmin', 'admin', 'member'] },
+  { name: 'Reports', href: '/reports', icon: BarChart3, roles: ['superadmin'] }, // ✅ Add this line
   { name: 'Settings', href: '/settings', icon: Settings, roles: ['superadmin', 'admin', 'member'] },
 ];
 

@@ -10,13 +10,23 @@ import {
   orderBy,
   where,
   Timestamp,
-  onSnapshot
+  onSnapshot,
+  setDoc,
+  getDoc,
+  increment
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { createNotification } from '../utils/notifications';
-import { Plus, Search, CheckCircle, Clock, AlertCircle, Trash2, Edit2, MessageCircle, Send, X } from 'lucide-react';
-import { format } from 'date-fns';
+import { Plus, Search, CheckCircle, Clock, AlertCircle, Trash2, Edit2, MessageCircle, Send, X, Award } from 'lucide-react';
+import { format, differenceInHours } from 'date-fns';
+
+interface StatusUpdate {
+  status: 'pending' | 'in-progress' | 'completed';
+  timestamp: Date;
+  updatedBy: string;
+  updatedByName: string;
+}
 
 interface TaskComment {
   id: string;
@@ -39,7 +49,13 @@ interface Task {
   createdBy: string;
   createdByName?: string;
   createdAt: Date;
+  assignedAt: Date; // ✅ Added
   dueDate: Date;
+  completedAt?: Date; // ✅ Added
+  completionTimeHours?: number; // ✅ Added
+  points?: number; // ✅ Added
+  isEarlyComplete?: boolean; // ✅ Added
+  statusHistory?: StatusUpdate[]; // ✅ Added
   commentsCount?: number;
 }
 
@@ -76,7 +92,6 @@ export const Tasks = () => {
     }
   }, [currentUser, userRole]);
 
-  // Real-time listener for comments
   useEffect(() => {
     if (!selectedTask) return;
 
@@ -105,11 +120,9 @@ export const Tasks = () => {
       const tasksRef = collection(db, 'tasks');
       let q;
 
-      // Super Admin and Admin see ALL tasks
       if (userRole === 'superadmin' || userRole === 'admin') {
         q = query(tasksRef, orderBy('createdAt', 'desc'));
       } else {
-        // Members see only THEIR assigned tasks
         q = query(
           tasksRef,
           where('assignedTo', '==', currentUser?.uid),
@@ -122,7 +135,6 @@ export const Tasks = () => {
         snapshot.docs.map(async (taskDoc) => {
           const data = taskDoc.data();
           
-          // Count comments for each task
           const commentsRef = collection(db, 'taskComments');
           const commentsQuery = query(commentsRef, where('taskId', '==', taskDoc.id));
           const commentsSnapshot = await getDocs(commentsQuery);
@@ -131,7 +143,13 @@ export const Tasks = () => {
             id: taskDoc.id,
             ...data,
             createdAt: data.createdAt?.toDate() || new Date(),
+            assignedAt: data.assignedAt?.toDate() || new Date(), // ✅ Added
             dueDate: data.dueDate?.toDate() || new Date(),
+            completedAt: data.completedAt?.toDate() || null, // ✅ Added
+            statusHistory: data.statusHistory?.map((sh: any) => ({
+              ...sh,
+              timestamp: sh.timestamp?.toDate() || new Date()
+            })) || [],
             commentsCount: commentsSnapshot.size,
           };
         })
@@ -157,6 +175,61 @@ export const Tasks = () => {
     }
   };
 
+  // ✅ Calculate points based on completion time
+  const calculatePoints = (dueDate: Date, completedAt: Date): { points: number; isEarly: boolean } => {
+    const hoursBeforeDue = differenceInHours(dueDate, completedAt);
+    
+    if (hoursBeforeDue > 24) {
+      return { points: 150, isEarly: true };
+    } else if (hoursBeforeDue > 12) {
+      return { points: 100, isEarly: true };
+    } else if (hoursBeforeDue > 0) {
+      return { points: 75, isEarly: true };
+    } else if (hoursBeforeDue === 0 || hoursBeforeDue > -1) {
+      return { points: 50, isEarly: false };
+    } else {
+      return { points: 0, isEarly: false };
+    }
+  };
+
+  // ✅ Update user stats in Firestore
+  const updateUserStats = async (userId: string, points: number, completionTimeHours: number) => {
+    const userStatsRef = doc(db, 'userStats', userId);
+    
+    try {
+      const userStatsDoc = await getDoc(userStatsRef);
+      
+      if (userStatsDoc.exists()) {
+        const currentStats = userStatsDoc.data();
+        const newTotalTasks = (currentStats.tasksCompleted || 0) + 1;
+        const currentTotalTime = (currentStats.totalCompletionTime || 0);
+        const newTotalTime = currentTotalTime + completionTimeHours;
+        const newAvgTime = newTotalTime / newTotalTasks;
+        
+        await updateDoc(userStatsRef, {
+          tasksCompleted: increment(1),
+          totalPoints: increment(points),
+          totalCompletionTime: increment(completionTimeHours),
+          averageCompletionTime: newAvgTime,
+          lastUpdated: Timestamp.now()
+        });
+      } else {
+        await setDoc(userStatsRef, {
+          userId,
+          tasksCompleted: 1,
+          totalPoints: points,
+          totalCompletionTime: completionTimeHours,
+          averageCompletionTime: completionTimeHours,
+          totalTasksAssigned: 1,
+          onTimeDeliveryRate: points > 0 ? 100 : 0,
+          lastUpdated: Timestamp.now()
+        });
+      }
+    } catch (error) {
+      console.error('Error updating user stats:', error);
+    }
+  };
+
   const handleCreateTask = async () => {
     if (!currentUser || !formData.title || !formData.assignedTo || !formData.dueDate) {
       setError('Please fill all required fields');
@@ -167,6 +240,14 @@ export const Tasks = () => {
     setError('');
     try {
       const assignedUser = users.find(u => u.uid === formData.assignedTo);
+      const now = Timestamp.now();
+      
+      const initialStatusHistory: StatusUpdate = {
+        status: formData.status,
+        timestamp: now.toDate(),
+        updatedBy: currentUser.uid,
+        updatedByName: userData?.displayName || ''
+      };
       
       await addDoc(collection(db, 'tasks'), {
         title: formData.title,
@@ -177,9 +258,34 @@ export const Tasks = () => {
         assignedToName: assignedUser?.displayName || '',
         createdBy: currentUser.uid,
         createdByName: userData?.displayName || '',
-        createdAt: Timestamp.now(),
+        createdAt: now,
+        assignedAt: now, // ✅ Track assignment time
         dueDate: Timestamp.fromDate(new Date(formData.dueDate)),
+        points: 0,
+        isEarlyComplete: false,
+        completionTimeHours: 0,
+        statusHistory: [initialStatusHistory]
       });
+
+      // ✅ Update assigned user's total tasks
+      const userStatsRef = doc(db, 'userStats', formData.assignedTo);
+      const userStatsDoc = await getDoc(userStatsRef);
+      
+      if (userStatsDoc.exists()) {
+        await updateDoc(userStatsRef, {
+          totalTasksAssigned: increment(1)
+        });
+      } else {
+        await setDoc(userStatsRef, {
+          userId: formData.assignedTo,
+          totalTasksAssigned: 1,
+          tasksCompleted: 0,
+          totalPoints: 0,
+          totalCompletionTime: 0,
+          averageCompletionTime: 0,
+          lastUpdated: Timestamp.now()
+        });
+      }
 
       await createNotification(
         formData.assignedTo,
@@ -212,7 +318,6 @@ export const Tasks = () => {
       await updateDoc(doc(db, 'tasks', editingTask.id), {
         title: formData.title,
         description: formData.description,
-        status: formData.status,
         priority: formData.priority,
         assignedTo: formData.assignedTo,
         assignedToName: assignedUser?.displayName || '',
@@ -249,7 +354,6 @@ export const Tasks = () => {
     try {
       await deleteDoc(doc(db, 'tasks', taskId));
       
-      // Delete all comments for this task
       const commentsRef = collection(db, 'taskComments');
       const commentsQuery = query(commentsRef, where('taskId', '==', taskId));
       const commentsSnapshot = await getDocs(commentsQuery);
@@ -266,30 +370,79 @@ export const Tasks = () => {
     }
   };
 
+  // ✅ Fixed: Status change with points calculation
   const handleStatusChange = async (taskId: string, newStatus: 'pending' | 'in-progress' | 'completed') => {
     try {
-      await updateDoc(doc(db, 'tasks', taskId), {
-        status: newStatus,
-      });
-
       const task = tasks.find(t => t.id === taskId);
-      if (task && task.createdBy !== currentUser?.uid) {
-        await createNotification(
-          task.createdBy,
-          'Task Status Updated',
-          `${task.title} is now ${newStatus}`,
-          'task'
-        );
+      if (!task) return;
+
+      const now = new Date();
+      const statusUpdate: StatusUpdate = {
+        status: newStatus,
+        timestamp: now,
+        updatedBy: currentUser?.uid || '',
+        updatedByName: userData?.displayName || ''
+      };
+
+      const updatedStatusHistory = [...(task.statusHistory || []), statusUpdate];
+
+      // ✅ Calculate points when completing task
+      if (newStatus === 'completed' && !task.completedAt) {
+        const completedAt = now;
+        const completionTimeHours = differenceInHours(completedAt, task.assignedAt);
+        const { points, isEarly } = calculatePoints(task.dueDate, completedAt);
+
+        await updateDoc(doc(db, 'tasks', taskId), {
+          status: newStatus,
+          completedAt: Timestamp.fromDate(completedAt),
+          completionTimeHours,
+          points,
+          isEarlyComplete: isEarly,
+          statusHistory: updatedStatusHistory
+        });
+
+        // Update user stats
+        if (currentUser?.uid === task.assignedTo) {
+          await updateUserStats(task.assignedTo, points, completionTimeHours);
+        }
+
+        // Notify creator
+        if (task.createdBy !== currentUser?.uid) {
+          await createNotification(
+            task.createdBy,
+            'Task Completed ✅',
+            `${task.title} has been completed${isEarly ? ' early!' : '!'} (+${points} points)`,
+            'task'
+          );
+        }
+
+        setSuccess(`Task completed! ${isEarly ? `+${points} bonus points! 🎉` : `+${points} points`}`);
+      } else {
+        await updateDoc(doc(db, 'tasks', taskId), {
+          status: newStatus,
+          statusHistory: updatedStatusHistory
+        });
+
+        if (task.createdBy !== currentUser?.uid) {
+          await createNotification(
+            task.createdBy,
+            'Task Status Updated',
+            `${task.title} is now ${newStatus}`,
+            'task'
+          );
+        }
+
+        setSuccess('Status updated successfully!');
       }
 
       fetchTasks();
+      setTimeout(() => setSuccess(''), 3000);
     } catch (error) {
       console.error('Error updating status:', error);
       setError('Failed to update status');
     }
   };
 
-  // Send chat message
   const handleSendComment = async () => {
     if (!selectedTask || !newComment.trim() || !currentUser) return;
 
@@ -304,7 +457,6 @@ export const Tasks = () => {
         timestamp: Timestamp.now(),
       });
 
-      // Notify task creator and assignee
       const notifyUsers = [selectedTask.createdBy, selectedTask.assignedTo].filter(
         uid => uid !== currentUser.uid
       );
@@ -319,7 +471,7 @@ export const Tasks = () => {
       }
 
       setNewComment('');
-      fetchTasks(); // Update comment count
+      fetchTasks();
     } catch (error) {
       console.error('Error sending comment:', error);
       setError('Failed to send message');
@@ -384,7 +536,6 @@ export const Tasks = () => {
     }
   };
 
-  // Updated permission check - Only Super Admin can edit/delete
   const canEditTask = (task: Task) => {
     return userRole === 'superadmin';
   };
@@ -398,6 +549,18 @@ export const Tasks = () => {
     }
   };
 
+  const formatCompletionTime = (hours: number) => {
+    if (hours < 1) {
+      return `${Math.round(hours * 60)} mins`;
+    } else if (hours < 24) {
+      return `${Math.round(hours)} hrs`;
+    } else {
+      const days = Math.floor(hours / 24);
+      const remainingHours = Math.round(hours % 24);
+      return `${days}d ${remainingHours}h`;
+    }
+  };
+
   return (
     <div>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
@@ -405,7 +568,6 @@ export const Tasks = () => {
           <h1 className="text-3xl font-bold text-gray-900">Tasks</h1>
           <p className="text-gray-600 mt-1">Manage and track your team's tasks</p>
         </div>
-        {/* Only Super Admin and Admin can create tasks */}
         {(userRole === 'superadmin' || userRole === 'admin') && (
           <button onClick={() => setShowModal(true)} className="btn-primary flex items-center">
             <Plus className="h-5 w-5 mr-2" />
@@ -474,9 +636,15 @@ export const Tasks = () => {
                 <span className={`px-3 py-1 rounded-full text-xs font-medium border ${getPriorityColor(task.priority)}`}>
                   {task.priority}
                 </span>
+                {/* ✅ Show points if task completed */}
+                {task.isEarlyComplete && task.points && (
+                  <span className="flex items-center px-2 py-1 bg-yellow-100 text-yellow-700 rounded-full text-xs font-medium">
+                    <Award className="h-3 w-3 mr-1" />
+                    +{task.points}
+                  </span>
+                )}
               </div>
               <div className="flex items-center space-x-1">
-                {/* Chat Button - Everyone can chat */}
                 <button
                   onClick={() => openChatModal(task)}
                   className="relative p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
@@ -490,7 +658,6 @@ export const Tasks = () => {
                   )}
                 </button>
                 
-                {/* Edit/Delete - Only Super Admin */}
                 {canEditTask(task) && (
                   <>
                     <button
@@ -521,9 +688,26 @@ export const Tasks = () => {
                 <span className="font-medium text-gray-900">{task.assignedToName}</span>
               </div>
               <div className="flex items-center justify-between">
+                <span className="text-gray-600">Assigned at:</span>
+                <span className="font-medium text-gray-900">{format(task.assignedAt, 'MMM d, h:mm a')}</span>
+              </div>
+              <div className="flex items-center justify-between">
                 <span className="text-gray-600">Due date:</span>
                 <span className="font-medium text-gray-900">{format(task.dueDate, 'MMM d, yyyy')}</span>
               </div>
+              {/* ✅ Show completion details */}
+              {task.completedAt && (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-600">Completed:</span>
+                    <span className="font-medium text-green-600">{format(task.completedAt, 'MMM d, h:mm a')}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-600">Time taken:</span>
+                    <span className="font-medium text-gray-900">{formatCompletionTime(task.completionTimeHours || 0)}</span>
+                  </div>
+                </>
+              )}
               {task.createdByName && (
                 <div className="flex items-center justify-between">
                   <span className="text-gray-600">Created by:</span>
@@ -532,13 +716,13 @@ export const Tasks = () => {
               )}
             </div>
 
-            {/* Status Change - Everyone can update status */}
             <div className="pt-4 border-t border-gray-100">
               <label className="block text-xs font-medium text-gray-700 mb-2">Update Status:</label>
               <select
                 value={task.status}
                 onChange={(e) => handleStatusChange(task.id, e.target.value as any)}
                 className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                disabled={task.status === 'completed'}
               >
                 <option value="pending">Pending</option>
                 <option value="in-progress">In Progress</option>
@@ -563,7 +747,7 @@ export const Tasks = () => {
         </div>
       )}
 
-      {/* Create/Edit Task Modal - Only for Super Admin and Admin */}
+      {/* Create/Edit Modal - SAME AS BEFORE */}
       {showModal && (userRole === 'superadmin' || userRole === 'admin') && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
@@ -699,11 +883,10 @@ export const Tasks = () => {
         </div>
       )}
 
-      {/* Chat Modal - Everyone can access */}
+      {/* Chat Modal - SAME AS BEFORE */}
       {showChatModal && selectedTask && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full h-[600px] flex flex-col">
-            {/* Chat Header */}
             <div className="flex items-center justify-between p-4 border-b border-gray-200">
               <div className="flex-1">
                 <h2 className="text-lg font-bold text-gray-900">{selectedTask.title}</h2>
@@ -721,7 +904,6 @@ export const Tasks = () => {
               </button>
             </div>
 
-            {/* Messages Area */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {comments.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full text-gray-400">
@@ -765,7 +947,6 @@ export const Tasks = () => {
               )}
             </div>
 
-            {/* Input Area */}
             <div className="p-4 border-t border-gray-200">
               <div className="flex items-end space-x-2">
                 <textarea

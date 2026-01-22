@@ -188,8 +188,10 @@ export const Layout = ({ children }: LayoutProps) => {
     { path: '/tasks', icon: CheckSquare, label: 'Tasks' },
     { path: '/team', icon: Users, label: 'Team' },
     { path: '/meetings', icon: Calendar, label: 'Meetings' },
+    { path: '/reports', icon: Star, label: 'Reports' },
     { path: 'chat', icon: MessageCircle, label: 'Team Chat', isChat: true }, // Special chat item
     { path: '/settings', icon: Settings, label: 'Settings' },
+
   ];
 
   const getRankIcon = (index: number) => {

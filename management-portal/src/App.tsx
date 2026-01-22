@@ -1,19 +1,20 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
-import { NotificationProvider } from './contexts/NotificationContext';  // ← Add this import
+import { NotificationProvider } from './contexts/NotificationContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Layout } from './components/layout/Layout';
 import { Login } from './pages/Login';
-import { Dashboard } from './pages/dashboard.tsx';  // ← Fix: Capital D
+import { Dashboard } from './pages/dashboard.tsx';
 import { Tasks } from './pages/Tasks';
 import { Team } from './pages/Team';
 import { Meetings } from './pages/Meetings';
 import { Settings } from './pages/Settings';
+import { Reports } from './pages/Reports'; // ✅ Add this import
 
 function App() {
   return (
     <AuthProvider>
-      <NotificationProvider>  {/* ← Add this wrapper */}
+      <NotificationProvider>
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<Login />} />
@@ -57,6 +58,17 @@ function App() {
                 </ProtectedRoute>
               }
             />
+            {/* ✅ Add Reports Route - Only for Super Admin */}
+            <Route
+              path="/reports"
+              element={
+                <ProtectedRoute allowedRoles={['superadmin']}>
+                  <Layout>
+                    <Reports />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
             <Route
               path="/settings"
               element={
@@ -71,7 +83,7 @@ function App() {
             <Route path="*" element={<Navigate to="/login" replace />} />
           </Routes>
         </BrowserRouter>
-      </NotificationProvider>  {/* ← Close the wrapper */}
+      </NotificationProvider>
     </AuthProvider>
   );
 }
