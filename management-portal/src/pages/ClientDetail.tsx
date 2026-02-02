@@ -209,11 +209,11 @@ export const ClientDetail = () => {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'completed':
-        return 'bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400';
+        return 'bg-green-100 text-green-700';
       case 'in_progress':
-        return 'bg-blue-100 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400';
+        return 'bg-blue-100 text-blue-700';
       case 'pending':
-        return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-400';
+        return 'bg-yellow-100 text-yellow-700';
       default:
         return 'bg-gray-100 text-gray-700';
     }
@@ -222,11 +222,11 @@ export const ClientDetail = () => {
   const getPriorityColor = (priority: string) => {
     switch (priority) {
       case 'high':
-        return 'text-red-600 dark:text-red-400';
+        return 'text-red-600';
       case 'medium':
-        return 'text-orange-600 dark:text-orange-400';
+        return 'text-orange-600';
       case 'low':
-        return 'text-green-600 dark:text-green-400';
+        return 'text-green-600';
       default:
         return 'text-gray-600';
     }
@@ -244,7 +244,7 @@ export const ClientDetail = () => {
     return (
       <div className="text-center py-12">
         <Building2 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-        <h3 className="text-lg font-medium text-gray-900 dark:text-white">Client not found</h3>
+        <h3 className="text-lg font-medium text-gray-900">Client not found</h3>
         <button
           onClick={() => navigate('/clients')}
           className="mt-4 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
@@ -267,40 +267,40 @@ export const ClientDetail = () => {
       {/* Back Button */}
       <button
         onClick={() => navigate('/clients')}
-        className="flex items-center gap-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+        className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
       >
         <ArrowLeft className="w-4 h-4" />
         Back to Clients
       </button>
 
       {/* Client Header Card */}
-      <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl p-6">
+      <div className="bg-white border border-gray-200 rounded-xl p-6">
         <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
           <div className="flex items-start gap-4">
-            <div className="w-16 h-16 rounded-full bg-primary-100 dark:bg-primary-900/20 flex items-center justify-center flex-shrink-0">
-              <Building2 className="w-8 h-8 text-primary-600 dark:text-primary-400" />
+            <div className="w-16 h-16 rounded-full bg-primary-100 flex items-center justify-center flex-shrink-0">
+              <Building2 className="w-8 h-8 text-primary-600" />
             </div>
             <div className="flex-1">
               <div className="flex items-center gap-3 mb-2">
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{client.name}</h1>
+                <h1 className="text-2xl font-bold text-gray-900">{client.name}</h1>
                 <span className={`px-3 py-1 text-xs font-medium rounded-full ${
                   client.status === 'active' 
-                    ? 'bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400' 
+                    ? 'bg-green-100 text-green-700' 
                     : 'bg-gray-100 text-gray-700'
                 }`}>
                   {client.status}
                 </span>
               </div>
               {client.company && (
-                <p className="text-gray-500 dark:text-gray-400 mb-3">{client.company}</p>
+                <p className="text-gray-500 mb-3">{client.company}</p>
               )}
               <div className="flex flex-wrap gap-4 text-sm">
-                <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+                <div className="flex items-center gap-2 text-gray-600">
                   <Mail className="w-4 h-4" />
                   {client.email}
                 </div>
                 {client.phone && (
-                  <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+                  <div className="flex items-center gap-2 text-gray-600">
                     <Phone className="w-4 h-4" />
                     {client.phone}
                   </div>
@@ -310,7 +310,7 @@ export const ClientDetail = () => {
                     href={client.website} 
                     target="_blank" 
                     rel="noopener noreferrer"
-                    className="flex items-center gap-2 text-primary-600 dark:text-primary-400 hover:underline"
+                    className="flex items-center gap-2 text-primary-600 hover:underline"
                   >
                     <Globe className="w-4 h-4" />
                     Website
@@ -321,7 +321,7 @@ export const ClientDetail = () => {
           </div>
           <button
             onClick={() => navigate(`/clients/${clientId}/edit`)}
-            className="flex items-center gap-2 px-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
           >
             <Edit2 className="w-4 h-4" />
             Edit
@@ -329,14 +329,14 @@ export const ClientDetail = () => {
         </div>
 
         {(client.address || client.industry) && (
-          <div className="mt-4 pt-4 border-t border-gray-200 dark:border-slate-800 flex flex-wrap gap-4 text-sm">
+          <div className="mt-4 pt-4 border-t border-gray-200 flex flex-wrap gap-4 text-sm">
             {client.industry && (
-              <div className="text-gray-600 dark:text-gray-400">
+              <div className="text-gray-600">
                 <span className="font-medium">Industry:</span> {client.industry}
               </div>
             )}
             {client.address && (
-              <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+              <div className="flex items-center gap-2 text-gray-600">
                 <MapPin className="w-4 h-4" />
                 {client.address}
               </div>
@@ -346,7 +346,7 @@ export const ClientDetail = () => {
       </div>
 
       {/* Tabs */}
-      <div className="border-b border-gray-200 dark:border-slate-800">
+      <div className="border-b border-gray-200">
         <nav className="flex space-x-8 overflow-x-auto">
           {tabs.map((tab) => {
             const Icon = tab.icon;
@@ -356,14 +356,14 @@ export const ClientDetail = () => {
                 onClick={() => setActiveTab(tab.id as any)}
                 className={`flex items-center gap-2 py-3 border-b-2 transition-colors whitespace-nowrap ${
                   activeTab === tab.id
-                    ? 'border-primary-600 text-primary-600 dark:text-primary-400'
-                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                    ? 'border-primary-600 text-primary-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
                 }`}
               >
                 <Icon className="w-5 h-5" />
                 <span className="font-medium">{tab.label}</span>
                 {tab.count !== undefined && (
-                  <span className="px-2 py-0.5 text-xs bg-gray-100 dark:bg-slate-800 rounded-full">
+                  <span className="px-2 py-0.5 text-xs bg-gray-100 rounded-full">
                     {tab.count}
                   </span>
                 )}
@@ -381,30 +381,30 @@ export const ClientDetail = () => {
             <div className="lg:col-span-2 space-y-6">
               {/* Quick Stats */}
               <div className="grid grid-cols-3 gap-4">
-                <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg p-4">
-                  <div className="text-sm text-gray-500 dark:text-gray-400">Tasks</div>
-                  <div className="text-2xl font-bold text-gray-900 dark:text-white mt-1">{tasks.length}</div>
+                <div className="bg-white border border-gray-200 rounded-lg p-4">
+                  <div className="text-sm text-gray-500">Tasks</div>
+                  <div className="text-2xl font-bold text-gray-900 mt-1">{tasks.length}</div>
                 </div>
-                <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg p-4">
-                  <div className="text-sm text-gray-500 dark:text-gray-400">Meetings</div>
-                  <div className="text-2xl font-bold text-gray-900 dark:text-white mt-1">{meetings.length}</div>
+                <div className="bg-white border border-gray-200 rounded-lg p-4">
+                  <div className="text-sm text-gray-500">Meetings</div>
+                  <div className="text-2xl font-bold text-gray-900 mt-1">{meetings.length}</div>
                 </div>
-                <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg p-4">
-                  <div className="text-sm text-gray-500 dark:text-gray-400">Notes</div>
-                  <div className="text-2xl font-bold text-gray-900 dark:text-white mt-1">{notes.length}</div>
+                <div className="bg-white border border-gray-200 rounded-lg p-4">
+                  <div className="text-sm text-gray-500">Notes</div>
+                  <div className="text-2xl font-bold text-gray-900 mt-1">{notes.length}</div>
                 </div>
               </div>
 
               {/* Recent Activity */}
-              <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg p-6">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Recent Tasks</h3>
+              <div className="bg-white border border-gray-200 rounded-lg p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Tasks</h3>
                 {tasks.slice(0, 3).length > 0 ? (
                   <div className="space-y-3">
                     {tasks.slice(0, 3).map((task) => (
-                      <div key={task.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-slate-800 rounded-lg">
+                      <div key={task.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                         <div>
-                          <div className="font-medium text-gray-900 dark:text-white">{task.title}</div>
-                          <div className="text-sm text-gray-500 dark:text-gray-400">{task.assignedToName || 'Unassigned'}</div>
+                          <div className="font-medium text-gray-900">{task.title}</div>
+                          <div className="text-sm text-gray-500">{task.assignedToName || 'Unassigned'}</div>
                         </div>
                         <span className={`px-2 py-1 text-xs rounded-full ${getStatusColor(task.status)}`}>
                           {task.status?.replace('_', ' ')}
@@ -413,7 +413,7 @@ export const ClientDetail = () => {
                     ))}
                   </div>
                 ) : (
-                  <p className="text-gray-500 dark:text-gray-400 text-sm">No tasks yet</p>
+                  <p className="text-gray-500 text-sm">No tasks yet</p>
                 )}
               </div>
             </div>
@@ -421,25 +421,25 @@ export const ClientDetail = () => {
             {/* Sidebar */}
             <div className="space-y-6">
               {client.notes && (
-                <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg p-6">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">Client Notes</h3>
-                  <p className="text-gray-600 dark:text-gray-400 text-sm">{client.notes}</p>
+                <div className="bg-white border border-gray-200 rounded-lg p-6">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-3">Client Notes</h3>
+                  <p className="text-gray-600 text-sm">{client.notes}</p>
                 </div>
               )}
 
-              <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg p-6">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">Quick Actions</h3>
+              <div className="bg-white border border-gray-200 rounded-lg p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-3">Quick Actions</h3>
                 <div className="space-y-2">
                   <button
                     onClick={() => navigate(`/tasks?clientId=${clientId}`)}
-                    className="w-full flex items-center gap-2 px-4 py-2 bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400 rounded-lg hover:bg-primary-100 dark:hover:bg-primary-900/30 transition-colors"
+                    className="w-full flex items-center gap-2 px-4 py-2 bg-primary-50 text-primary-600 rounded-lg hover:bg-primary-100 transition-colors"
                   >
                     <Plus className="w-4 h-4" />
                     Create Task
                   </button>
                   <button
                     onClick={() => navigate(`/meetings?clientId=${clientId}`)}
-                    className="w-full flex items-center gap-2 px-4 py-2 bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors"
+                    className="w-full flex items-center gap-2 px-4 py-2 bg-purple-50 text-purple-600 rounded-lg hover:bg-purple-100 transition-colors"
                   >
                     <Plus className="w-4 h-4" />
                     Schedule Meeting
@@ -455,15 +455,15 @@ export const ClientDetail = () => {
           <div className="space-y-4">
             {tasks.length > 0 ? (
               tasks.map((task) => (
-                <div key={task.id} className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg p-6">
+                <div key={task.id} className="bg-white border border-gray-200 rounded-lg p-6">
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex-1">
-                      <h3 className="font-semibold text-gray-900 dark:text-white text-lg">{task.title}</h3>
-                      <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{task.description}</p>
+                      <h3 className="font-semibold text-gray-900 text-lg">{task.title}</h3>
+                      <p className="text-sm text-gray-500 mt-1">{task.description}</p>
                     </div>
                     <button
                       onClick={() => handleDeleteTask(task.id)}
-                      className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -478,7 +478,7 @@ export const ClientDetail = () => {
                       </span>
                     </div>
                     {task.assignedToName && (
-                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                      <span className="text-xs text-gray-500">
                         Assigned to: {task.assignedToName}
                       </span>
                     )}
@@ -487,8 +487,8 @@ export const ClientDetail = () => {
               ))
             ) : (
               <div className="text-center py-12">
-                <CheckSquare className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
-                <p className="text-gray-500 dark:text-gray-400">No tasks for this client yet</p>
+                <CheckSquare className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                <p className="text-gray-500">No tasks for this client yet</p>
                 <button
                   onClick={() => navigate(`/tasks?clientId=${clientId}`)}
                   className="mt-4 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
@@ -505,20 +505,20 @@ export const ClientDetail = () => {
           <div className="space-y-4">
             {meetings.length > 0 ? (
               meetings.map((meeting) => (
-                <div key={meeting.id} className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg p-6">
+                <div key={meeting.id} className="bg-white border border-gray-200 rounded-lg p-6">
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex-1">
-                      <h3 className="font-semibold text-gray-900 dark:text-white text-lg">{meeting.title}</h3>
-                      <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{meeting.description}</p>
+                      <h3 className="font-semibold text-gray-900 text-lg">{meeting.title}</h3>
+                      <p className="text-sm text-gray-500 mt-1">{meeting.description}</p>
                     </div>
                     <button
                       onClick={() => handleDeleteMeeting(meeting.id)}
-                      className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
-                  <div className="flex items-center gap-4 text-sm text-gray-600 dark:text-gray-400">
+                  <div className="flex items-center gap-4 text-sm text-gray-600">
                     <div className="flex items-center gap-2">
                       <Calendar className="w-4 h-4" />
                       {meeting.date?.toDate?.().toLocaleDateString()}
@@ -530,8 +530,8 @@ export const ClientDetail = () => {
               ))
             ) : (
               <div className="text-center py-12">
-                <Calendar className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
-                <p className="text-gray-500 dark:text-gray-400">No meetings scheduled for this client</p>
+                <Calendar className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                <p className="text-gray-500">No meetings scheduled for this client</p>
                 <button
                   onClick={() => navigate(`/meetings?clientId=${clientId}`)}
                   className="mt-4 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
@@ -546,12 +546,12 @@ export const ClientDetail = () => {
         {/* Notes Tab */}
         {activeTab === 'notes' && (
           <div className="space-y-4">
-            <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg p-4">
+            <div className="bg-white border border-gray-200 rounded-lg p-4">
               <textarea
                 value={newNote}
                 onChange={(e) => setNewNote(e.target.value)}
                 placeholder="Add a note about this client..."
-                className="w-full px-4 py-3 border border-gray-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-gray-900 dark:text-white resize-none focus:ring-2 focus:ring-primary-500"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-primary-500"
                 rows={3}
               />
               <button
@@ -565,19 +565,19 @@ export const ClientDetail = () => {
             </div>
 
             {notes.map((note) => (
-              <div key={note.id} className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg p-6">
+              <div key={note.id} className="bg-white border border-gray-200 rounded-lg p-6">
                 <div className="flex items-start justify-between mb-3">
-                  <p className="text-gray-900 dark:text-white flex-1">{note.note}</p>
+                  <p className="text-gray-900 flex-1">{note.note}</p>
                   {note.createdBy === currentUser?.uid && (
                     <button
                       onClick={() => handleDeleteNote(note.id)}
-                      className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
                   )}
                 </div>
-                <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                <div className="flex items-center justify-between text-xs text-gray-500">
                   <span>{note.createdByName}</span>
                   <span>{note.createdAt?.toDate?.().toLocaleString()}</span>
                 </div>
@@ -586,8 +586,8 @@ export const ClientDetail = () => {
 
             {notes.length === 0 && (
               <div className="text-center py-12">
-                <FileText className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
-                <p className="text-gray-500 dark:text-gray-400">No notes yet for this client</p>
+                <FileText className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                <p className="text-gray-500">No notes yet for this client</p>
               </div>
             )}
           </div>

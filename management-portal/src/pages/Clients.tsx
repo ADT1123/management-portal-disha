@@ -67,8 +67,8 @@ export const Clients = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Clients</h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
+          <h1 className="text-3xl font-bold text-gray-900">Clients</h1>
+          <p className="text-gray-500 mt-1">
             Manage all your client accounts and relationships
           </p>
         </div>
@@ -83,21 +83,21 @@ export const Clients = () => {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg p-4">
-          <div className="text-sm text-gray-500 dark:text-gray-400">Total Clients</div>
-          <div className="text-2xl font-bold text-gray-900 dark:text-white mt-1">{stats.total}</div>
+        <div className="bg-white border border-gray-200 rounded-lg p-4">
+          <div className="text-sm text-gray-500">Total Clients</div>
+          <div className="text-2xl font-bold text-gray-900 mt-1">{stats.total}</div>
         </div>
-        <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg p-4">
-          <div className="text-sm text-gray-500 dark:text-gray-400">Active</div>
-          <div className="text-2xl font-bold text-green-600 dark:text-green-400 mt-1">{stats.active}</div>
+        <div className="bg-white border border-gray-200 rounded-lg p-4">
+          <div className="text-sm text-gray-500">Active</div>
+          <div className="text-2xl font-bold text-green-600 mt-1">{stats.active}</div>
         </div>
-        <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg p-4">
-          <div className="text-sm text-gray-500 dark:text-gray-400">Inactive</div>
-          <div className="text-2xl font-bold text-gray-600 dark:text-gray-400 mt-1">{stats.inactive}</div>
+        <div className="bg-white border border-gray-200 rounded-lg p-4">
+          <div className="text-sm text-gray-500">Inactive</div>
+          <div className="text-2xl font-bold text-gray-600 mt-1">{stats.inactive}</div>
         </div>
-        <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg p-4">
-          <div className="text-sm text-gray-500 dark:text-gray-400">Pending</div>
-          <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400 mt-1">{stats.pending}</div>
+        <div className="bg-white border border-gray-200 rounded-lg p-4">
+          <div className="text-sm text-gray-500">Pending</div>
+          <div className="text-2xl font-bold text-yellow-600 mt-1">{stats.pending}</div>
         </div>
       </div>
 
@@ -110,13 +110,13 @@ export const Clients = () => {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search clients by name, email, or company..."
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-primary-500 bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
+            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
           />
         </div>
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value as any)}
-          className="px-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-primary-500 bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
+          className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500"
         >
           <option value="all">All Status</option>
           <option value="active">Active</option>
@@ -129,7 +129,7 @@ export const Clients = () => {
       {loading ? (
         <div className="text-center py-12">
           <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-gray-300 border-t-primary-600"></div>
-          <p className="text-gray-500 dark:text-gray-400 mt-4">Loading clients...</p>
+          <p className="text-gray-500 mt-4">Loading clients...</p>
         </div>
       ) : filteredClients.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -143,11 +143,11 @@ export const Clients = () => {
         </div>
       ) : (
         <div className="text-center py-12">
-          <Building2 className="w-16 h-16 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+          <Building2 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-gray-900 mb-2">
             {searchQuery || statusFilter !== 'all' ? 'No clients found' : 'No clients yet'}
           </h3>
-          <p className="text-gray-500 dark:text-gray-400 mb-4">
+          <p className="text-gray-500 mb-4">
             {searchQuery || statusFilter !== 'all'
               ? 'Try adjusting your search or filters'
               : 'Get started by adding your first client'}
