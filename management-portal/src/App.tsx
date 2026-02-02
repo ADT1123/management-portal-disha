@@ -7,6 +7,7 @@ import { Login } from './pages/Login';
 import { Dashboard } from './pages/dashboard.tsx';
 import { Tasks } from './pages/Tasks';
 import { Team } from './pages/Team';
+import { Setup } from './pages/Setup';
 import { Meetings } from './pages/Meetings';
 import { Settings } from './pages/Settings';
 import { Reports } from './pages/Reports'; // ✅ Add this import
@@ -17,6 +18,15 @@ function App() {
       <NotificationProvider>
         <BrowserRouter>
           <Routes>
+          <Route
+            path="/setup"
+            element={
+              <Layout>
+                <Setup />
+              </Layout>
+            }
+          />
+
             <Route path="/login" element={<Login />} />
             <Route
               path="/dashboard"
@@ -48,6 +58,7 @@ function App() {
                 </ProtectedRoute>
               }
             />
+            
             <Route
               path="/meetings"
               element={
