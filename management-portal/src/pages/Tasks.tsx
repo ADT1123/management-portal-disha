@@ -953,6 +953,7 @@ export const Tasks = () => {
                   disabled={loading}
                 >
                   <option value="">No Client</option>
+                  <option value="all">All Clients</option>
                   {clients.map((client) => (
                     <option key={client.id} value={client.id}>
                       {client.name} {client.company && `(${client.company})`}

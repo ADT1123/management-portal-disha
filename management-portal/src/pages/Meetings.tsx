@@ -14,8 +14,8 @@ import {
 import { db } from '../config/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { createNotification } from '../utils/notifications';
-import { Plus, Calendar, Clock, MapPin, Users, Trash2, Edit2, FileText, X, CheckCircle2, Circle, XCircle, Building2 } from 'lucide-react';
-import { format, isPast, isToday, isTomorrow, isThisWeek, isThisMonth, startOfDay, endOfDay } from 'date-fns';
+import { Plus, Calendar, Clock, MapPin, Users, Trash2, Edit2, FileText, X, CheckCircle2, Circle, XCircle, Building2, Repeat } from 'lucide-react';
+import { format, isPast, isToday, isTomorrow, isThisWeek, isThisMonth, startOfDay, endOfDay, addDays, addWeeks, addMonths } from 'date-fns';
 
 interface Meeting {
   id: string;
@@ -31,6 +31,10 @@ interface Meeting {
   createdAt: Date;
   clientId?: string;
   clientName?: string;
+  isRecurring?: boolean;
+  recurringPattern?: 'daily' | 'weekly' | 'monthly';
+  recurringEndDate?: Date;
+  parentMeetingId?: string;
 }
 
 interface Client {
@@ -63,6 +67,9 @@ export const Meetings = () => {
     location: '',
     attendees: [] as string[],
     clientId: '',
+    isRecurring: false,
+    recurringPattern: 'weekly' as 'daily' | 'weekly' | 'monthly',
+    recurringEndDate: '',
   });
 
   useEffect(() => {
@@ -84,6 +91,7 @@ export const Meetings = () => {
         ...doc.data(),
         date: doc.data().date?.toDate() || new Date(),
         createdAt: doc.data().createdAt?.toDate() || new Date(),
+        recurringEndDate: doc.data().recurringEndDate?.toDate() || null,
         status: doc.data().status || 'scheduled',
       })) as Meeting[];
 
@@ -120,9 +128,60 @@ export const Meetings = () => {
     }
   };
 
+  const generateRecurringMeetings = async (
+    baseMeeting: any,
+    parentMeetingId: string,
+    startDate: Date,
+    endDate: Date,
+    pattern: 'daily' | 'weekly' | 'monthly'
+  ) => {
+    const recurringMeetings = [];
+    let currentDate = startDate;
+
+    while (currentDate <= endDate) {
+      let nextDate: Date;
+      
+      switch (pattern) {
+        case 'daily':
+          nextDate = addDays(currentDate, 1);
+          break;
+        case 'weekly':
+          nextDate = addWeeks(currentDate, 1);
+          break;
+        case 'monthly':
+          nextDate = addMonths(currentDate, 1);
+          break;
+        default:
+          nextDate = addWeeks(currentDate, 1);
+      }
+
+      if (nextDate > endDate) break;
+
+      recurringMeetings.push({
+        ...baseMeeting,
+        date: Timestamp.fromDate(nextDate),
+        createdAt: Timestamp.now(),
+        parentMeetingId,
+        isRecurring: false,
+        status: 'scheduled',
+      });
+
+      currentDate = nextDate;
+    }
+
+    for (const meeting of recurringMeetings) {
+      await addDoc(collection(db, 'meetings'), meeting);
+    }
+  };
+
   const handleCreateMeeting = async () => {
     if (!currentUser || !formData.title || !formData.date || !formData.time) {
       setError('Please fill all required fields');
+      return;
+    }
+
+    if (formData.isRecurring && !formData.recurringEndDate) {
+      setError('Please specify recurring end date');
       return;
     }
 
@@ -132,7 +191,7 @@ export const Meetings = () => {
       const meetingDateTime = new Date(`${formData.date}T${formData.time}`);
       const selectedClient = clients.find(c => c.id === formData.clientId);
 
-      await addDoc(collection(db, 'meetings'), {
+      const baseMeetingData = {
         title: formData.title,
         description: formData.description,
         date: Timestamp.fromDate(meetingDateTime),
@@ -141,22 +200,37 @@ export const Meetings = () => {
         createdBy: currentUser.uid,
         createdByName: userData?.displayName || '',
         mom: '',
-        status: 'scheduled',
+        status: 'scheduled' as 'scheduled' | 'completed' | 'cancelled',
         createdAt: Timestamp.now(),
         clientId: formData.clientId || null,
         clientName: selectedClient?.name || null,
-      });
+        isRecurring: formData.isRecurring,
+        recurringPattern: formData.isRecurring ? formData.recurringPattern : null,
+        recurringEndDate: formData.isRecurring ? Timestamp.fromDate(new Date(formData.recurringEndDate)) : null,
+      };
+
+      const docRef = await addDoc(collection(db, 'meetings'), baseMeetingData);
+
+      if (formData.isRecurring) {
+        await generateRecurringMeetings(
+          baseMeetingData,
+          docRef.id,
+          meetingDateTime,
+          new Date(formData.recurringEndDate),
+          formData.recurringPattern
+        );
+      }
 
       for (const attendeeId of formData.attendees) {
         await createNotification(
           attendeeId,
-          'New Meeting Scheduled',
-          `Meeting: ${formData.title}${selectedClient ? ` with ${selectedClient.name}` : ''} on ${format(meetingDateTime, 'PPP')}`,
+          `New ${formData.isRecurring ? 'Recurring ' : ''}Meeting Scheduled`,
+          `Meeting: ${formData.title}${selectedClient ? ` with ${selectedClient.name}` : ''} on ${format(meetingDateTime, 'PPP')}${formData.isRecurring ? ` (${formData.recurringPattern})` : ''}`,
           'meeting'
         );
       }
 
-      setSuccess('Meeting created successfully!');
+      setSuccess(`Meeting${formData.isRecurring ? 's' : ''} created successfully!`);
       setShowModal(false);
       resetForm();
       fetchMeetings();
@@ -320,6 +394,9 @@ export const Meetings = () => {
       location: '',
       attendees: [],
       clientId: '',
+      isRecurring: false,
+      recurringPattern: 'weekly',
+      recurringEndDate: '',
     });
   };
 
@@ -333,6 +410,9 @@ export const Meetings = () => {
       location: meeting.location,
       attendees: meeting.attendees,
       clientId: meeting.clientId || '',
+      isRecurring: false,
+      recurringPattern: 'weekly',
+      recurringEndDate: '',
     });
     setShowModal(true);
   };
@@ -425,6 +505,12 @@ export const Meetings = () => {
             <span className={`px-2.5 py-1 text-xs font-medium rounded-full ${getStatusColor(meeting.status)}`}>
               {meeting.status.charAt(0).toUpperCase() + meeting.status.slice(1)}
             </span>
+            {meeting.isRecurring && (
+              <span className="flex items-center px-2 py-1 bg-indigo-100 text-indigo-700 rounded-full text-xs font-medium">
+                <Repeat className="h-3 w-3 mr-1" />
+                {meeting.recurringPattern}
+              </span>
+            )}
             {meeting.clientName && (
               <span className="flex items-center px-2 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
                 <Building2 className="h-3 w-3 mr-1" />
@@ -734,6 +820,58 @@ export const Meetings = () => {
                   {formData.attendees.length} attendee(s) selected
                 </p>
               </div>
+
+              {!editingMeeting && (
+                <>
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      id="isRecurring"
+                      checked={formData.isRecurring}
+                      onChange={(e) => setFormData({ ...formData, isRecurring: e.target.checked })}
+                      className="h-4 w-4 text-primary-600 rounded focus:ring-primary-500"
+                      disabled={loading}
+                    />
+                    <label htmlFor="isRecurring" className="ml-2 text-sm font-medium text-gray-700">
+                      Make this a recurring meeting
+                    </label>
+                  </div>
+
+                  {formData.isRecurring && (
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Recurring Pattern *
+                        </label>
+                        <select
+                          value={formData.recurringPattern}
+                          onChange={(e) => setFormData({ ...formData, recurringPattern: e.target.value as any })}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                          disabled={loading}
+                        >
+                          <option value="daily">Daily</option>
+                          <option value="weekly">Weekly</option>
+                          <option value="monthly">Monthly</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Recurring End Date *
+                        </label>
+                        <input
+                          type="date"
+                          value={formData.recurringEndDate}
+                          onChange={(e) => setFormData({ ...formData, recurringEndDate: e.target.value })}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                          disabled={loading}
+                          min={formData.date || new Date().toISOString().split('T')[0]}
+                        />
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
             </div>
 
             <div className="flex space-x-3 mt-6">
