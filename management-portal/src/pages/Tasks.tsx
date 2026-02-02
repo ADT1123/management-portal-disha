@@ -18,8 +18,8 @@ import {
 import { db } from '../config/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { createNotification } from '../utils/notifications';
-import { Plus, Search, CheckCircle, Clock, AlertCircle, Trash2, Edit2, MessageCircle, Send, X, Award, Building2 } from 'lucide-react';
-import { format, differenceInHours } from 'date-fns';
+import { Plus, Search, CheckCircle, Clock, AlertCircle, Trash2, Edit2, MessageCircle, Send, X, Award, Building2, Repeat } from 'lucide-react';
+import { format, differenceInHours, addDays, addWeeks, addMonths, startOfDay } from 'date-fns';
 
 interface StatusUpdate {
   status: 'pending' | 'in-progress' | 'completed';
@@ -59,6 +59,10 @@ interface Task {
   commentsCount?: number;
   clientId?: string;
   clientName?: string;
+  isRecurring?: boolean;
+  recurringPattern?: 'daily' | 'weekly' | 'monthly';
+  recurringEndDate?: Date;
+  parentTaskId?: string;
 }
 
 interface Client {
@@ -94,6 +98,9 @@ export const Tasks = () => {
     assignedTo: '',
     dueDate: '',
     clientId: '',
+    isRecurring: false,
+    recurringPattern: 'weekly' as 'daily' | 'weekly' | 'monthly',
+    recurringEndDate: '',
   });
 
   useEffect(() => {
@@ -158,6 +165,7 @@ export const Tasks = () => {
             assignedAt: data.assignedAt?.toDate() || new Date(),
             dueDate: data.dueDate?.toDate() || new Date(),
             completedAt: data.completedAt?.toDate() || null,
+            recurringEndDate: data.recurringEndDate?.toDate() || null,
             statusHistory: data.statusHistory?.map((sh: any) => ({
               ...sh,
               timestamp: sh.timestamp?.toDate() || new Date()
@@ -197,6 +205,53 @@ export const Tasks = () => {
       setClients(clientsData);
     } catch (error) {
       console.error('Error fetching clients:', error);
+    }
+  };
+
+  const generateRecurringTasks = async (
+    baseTask: any,
+    parentTaskId: string,
+    startDate: Date,
+    endDate: Date,
+    pattern: 'daily' | 'weekly' | 'monthly'
+  ) => {
+    const recurringTasks = [];
+    let currentDate = startDate;
+
+    while (currentDate <= endDate) {
+      let nextDate: Date;
+      
+      switch (pattern) {
+        case 'daily':
+          nextDate = addDays(currentDate, 1);
+          break;
+        case 'weekly':
+          nextDate = addWeeks(currentDate, 1);
+          break;
+        case 'monthly':
+          nextDate = addMonths(currentDate, 1);
+          break;
+        default:
+          nextDate = addWeeks(currentDate, 1);
+      }
+
+      if (nextDate > endDate) break;
+
+      recurringTasks.push({
+        ...baseTask,
+        dueDate: Timestamp.fromDate(nextDate),
+        assignedAt: Timestamp.now(),
+        createdAt: Timestamp.now(),
+        parentTaskId,
+        isRecurring: false,
+        status: 'pending',
+      });
+
+      currentDate = nextDate;
+    }
+
+    for (const task of recurringTasks) {
+      await addDoc(collection(db, 'tasks'), task);
     }
   };
 
@@ -259,6 +314,11 @@ export const Tasks = () => {
       return;
     }
 
+    if (formData.isRecurring && !formData.recurringEndDate) {
+      setError('Please specify recurring end date');
+      return;
+    }
+
     setLoading(true);
     setError('');
     try {
@@ -273,7 +333,7 @@ export const Tasks = () => {
         updatedByName: userData?.displayName || ''
       };
       
-      await addDoc(collection(db, 'tasks'), {
+      const baseTaskData = {
         title: formData.title,
         description: formData.description,
         status: formData.status,
@@ -291,7 +351,22 @@ export const Tasks = () => {
         statusHistory: [initialStatusHistory],
         clientId: formData.clientId || null,
         clientName: selectedClient?.name || null,
-      });
+        isRecurring: formData.isRecurring,
+        recurringPattern: formData.isRecurring ? formData.recurringPattern : null,
+        recurringEndDate: formData.isRecurring ? Timestamp.fromDate(new Date(formData.recurringEndDate)) : null,
+      };
+
+      const docRef = await addDoc(collection(db, 'tasks'), baseTaskData);
+
+      if (formData.isRecurring) {
+        await generateRecurringTasks(
+          baseTaskData,
+          docRef.id,
+          new Date(formData.dueDate),
+          new Date(formData.recurringEndDate),
+          formData.recurringPattern
+        );
+      }
 
       const userStatsRef = doc(db, 'userStats', formData.assignedTo);
       const userStatsDoc = await getDoc(userStatsRef);
@@ -314,12 +389,12 @@ export const Tasks = () => {
 
       await createNotification(
         formData.assignedTo,
-        'New Task Assigned 📋',
-        `You have been assigned: ${formData.title}${selectedClient ? ` for ${selectedClient.name}` : ''}`,
+        `New ${formData.isRecurring ? 'Recurring ' : ''}Task Assigned 📋`,
+        `You have been assigned: ${formData.title}${selectedClient ? ` for ${selectedClient.name}` : ''}${formData.isRecurring ? ` (${formData.recurringPattern})` : ''}`,
         'task'
       );
 
-      setSuccess('Task created successfully!');
+      setSuccess(`Task${formData.isRecurring ? 's' : ''} created successfully!`);
       setShowModal(false);
       resetForm();
       fetchTasks();
@@ -518,6 +593,9 @@ export const Tasks = () => {
       assignedTo: '',
       dueDate: '',
       clientId: '',
+      isRecurring: false,
+      recurringPattern: 'weekly',
+      recurringEndDate: '',
     });
   };
 
@@ -531,6 +609,9 @@ export const Tasks = () => {
       assignedTo: task.assignedTo,
       dueDate: task.dueDate.toISOString().split('T')[0],
       clientId: task.clientId || '',
+      isRecurring: false,
+      recurringPattern: 'weekly',
+      recurringEndDate: '',
     });
     setShowModal(true);
   };
@@ -540,7 +621,8 @@ export const Tasks = () => {
                          task.description.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = filterStatus === 'all' || task.status === filterStatus;
     const matchesPriority = filterPriority === 'all' || task.priority === filterPriority;
-    const matchesClient = filterClient === 'all' || task.clientId === filterClient;
+    const matchesClient = filterClient === 'all' || 
+                          (filterClient === '' ? !task.clientId : task.clientId === filterClient);
     
     return matchesSearch && matchesStatus && matchesPriority && matchesClient;
   });
@@ -677,6 +759,12 @@ export const Tasks = () => {
                 <span className={`px-3 py-1 rounded-full text-xs font-medium border ${getPriorityColor(task.priority)}`}>
                   {task.priority}
                 </span>
+                {task.isRecurring && (
+                  <span className="flex items-center px-2 py-1 bg-indigo-100 text-indigo-700 rounded-full text-xs font-medium">
+                    <Repeat className="h-3 w-3 mr-1" />
+                    {task.recurringPattern}
+                  </span>
+                )}
                 {task.isEarlyComplete && task.points && (
                   <span className="flex items-center px-2 py-1 bg-yellow-100 text-yellow-700 rounded-full text-xs font-medium">
                     <Award className="h-3 w-3 mr-1" />
@@ -920,6 +1008,58 @@ export const Tasks = () => {
                   min={new Date().toISOString().split('T')[0]}
                 />
               </div>
+
+              {!editingTask && (
+                <>
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      id="isRecurring"
+                      checked={formData.isRecurring}
+                      onChange={(e) => setFormData({ ...formData, isRecurring: e.target.checked })}
+                      className="h-4 w-4 text-primary-600 rounded focus:ring-primary-500"
+                      disabled={loading}
+                    />
+                    <label htmlFor="isRecurring" className="ml-2 text-sm font-medium text-gray-700">
+                      Make this a recurring task
+                    </label>
+                  </div>
+
+                  {formData.isRecurring && (
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Recurring Pattern *
+                        </label>
+                        <select
+                          value={formData.recurringPattern}
+                          onChange={(e) => setFormData({ ...formData, recurringPattern: e.target.value as any })}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                          disabled={loading}
+                        >
+                          <option value="daily">Daily</option>
+                          <option value="weekly">Weekly</option>
+                          <option value="monthly">Monthly</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Recurring End Date *
+                        </label>
+                        <input
+                          type="date"
+                          value={formData.recurringEndDate}
+                          onChange={(e) => setFormData({ ...formData, recurringEndDate: e.target.value })}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                          disabled={loading}
+                          min={formData.dueDate || new Date().toISOString().split('T')[0]}
+                        />
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
             </div>
 
             <div className="flex space-x-3 mt-6">
