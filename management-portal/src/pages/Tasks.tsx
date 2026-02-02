@@ -18,7 +18,7 @@ import {
 import { db } from '../config/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { createNotification } from '../utils/notifications';
-import { Plus, Search, CheckCircle, Clock, AlertCircle, Trash2, Edit2, MessageCircle, Send, X, Award } from 'lucide-react';
+import { Plus, Search, CheckCircle, Clock, AlertCircle, Trash2, Edit2, MessageCircle, Send, X, Award, Building2 } from 'lucide-react';
 import { format, differenceInHours } from 'date-fns';
 
 interface StatusUpdate {
@@ -49,20 +49,29 @@ interface Task {
   createdBy: string;
   createdByName?: string;
   createdAt: Date;
-  assignedAt: Date; // ✅ Added
+  assignedAt: Date;
   dueDate: Date;
-  completedAt?: Date; // ✅ Added
-  completionTimeHours?: number; // ✅ Added
-  points?: number; // ✅ Added
-  isEarlyComplete?: boolean; // ✅ Added
-  statusHistory?: StatusUpdate[]; // ✅ Added
+  completedAt?: Date;
+  completionTimeHours?: number;
+  points?: number;
+  isEarlyComplete?: boolean;
+  statusHistory?: StatusUpdate[];
   commentsCount?: number;
+  clientId?: string; // ✅ NEW
+  clientName?: string; // ✅ NEW
+}
+
+interface Client {
+  id: string;
+  name: string;
+  company?: string;
 }
 
 export const Tasks = () => {
   const { currentUser, userRole, userData } = useAuth();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [users, setUsers] = useState<any[]>([]);
+  const [clients, setClients] = useState<Client[]>([]); // ✅ NEW
   const [showModal, setShowModal] = useState(false);
   const [showChatModal, setShowChatModal] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -72,6 +81,7 @@ export const Tasks = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterPriority, setFilterPriority] = useState<string>('all');
+  const [filterClient, setFilterClient] = useState<string>('all'); // ✅ NEW
   const [loading, setLoading] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
   const [error, setError] = useState('');
@@ -83,12 +93,14 @@ export const Tasks = () => {
     priority: 'medium' as 'low' | 'medium' | 'high',
     assignedTo: '',
     dueDate: '',
+    clientId: '', // ✅ NEW
   });
 
   useEffect(() => {
     if (currentUser && userRole) {
       fetchTasks();
       fetchUsers();
+      fetchClients(); // ✅ NEW
     }
   }, [currentUser, userRole]);
 
@@ -143,9 +155,9 @@ export const Tasks = () => {
             id: taskDoc.id,
             ...data,
             createdAt: data.createdAt?.toDate() || new Date(),
-            assignedAt: data.assignedAt?.toDate() || new Date(), // ✅ Added
+            assignedAt: data.assignedAt?.toDate() || new Date(),
             dueDate: data.dueDate?.toDate() || new Date(),
-            completedAt: data.completedAt?.toDate() || null, // ✅ Added
+            completedAt: data.completedAt?.toDate() || null,
             statusHistory: data.statusHistory?.map((sh: any) => ({
               ...sh,
               timestamp: sh.timestamp?.toDate() || new Date()
@@ -175,7 +187,20 @@ export const Tasks = () => {
     }
   };
 
-  // ✅ Calculate points based on completion time
+  // ✅ Fetch Clients
+  const fetchClients = async () => {
+    try {
+      const snapshot = await getDocs(collection(db, 'clients'));
+      const clientsData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      })) as Client[];
+      setClients(clientsData);
+    } catch (error) {
+      console.error('Error fetching clients:', error);
+    }
+  };
+
   const calculatePoints = (dueDate: Date, completedAt: Date): { points: number; isEarly: boolean } => {
     const hoursBeforeDue = differenceInHours(dueDate, completedAt);
     
@@ -192,7 +217,6 @@ export const Tasks = () => {
     }
   };
 
-  // ✅ Update user stats in Firestore
   const updateUserStats = async (userId: string, points: number, completionTimeHours: number) => {
     const userStatsRef = doc(db, 'userStats', userId);
     
@@ -240,6 +264,7 @@ export const Tasks = () => {
     setError('');
     try {
       const assignedUser = users.find(u => u.uid === formData.assignedTo);
+      const selectedClient = clients.find(c => c.id === formData.clientId); // ✅ NEW
       const now = Timestamp.now();
       
       const initialStatusHistory: StatusUpdate = {
@@ -259,15 +284,16 @@ export const Tasks = () => {
         createdBy: currentUser.uid,
         createdByName: userData?.displayName || '',
         createdAt: now,
-        assignedAt: now, // ✅ Track assignment time
+        assignedAt: now,
         dueDate: Timestamp.fromDate(new Date(formData.dueDate)),
         points: 0,
         isEarlyComplete: false,
         completionTimeHours: 0,
-        statusHistory: [initialStatusHistory]
+        statusHistory: [initialStatusHistory],
+        clientId: formData.clientId || null, // ✅ NEW
+        clientName: selectedClient?.name || null, // ✅ NEW
       });
 
-      // ✅ Update assigned user's total tasks
       const userStatsRef = doc(db, 'userStats', formData.assignedTo);
       const userStatsDoc = await getDoc(userStatsRef);
       
@@ -290,7 +316,7 @@ export const Tasks = () => {
       await createNotification(
         formData.assignedTo,
         'New Task Assigned 📋',
-        `You have been assigned: ${formData.title}`,
+        `You have been assigned: ${formData.title}${selectedClient ? ` for ${selectedClient.name}` : ''}`,
         'task'
       );
 
@@ -314,6 +340,7 @@ export const Tasks = () => {
     setLoading(true);
     try {
       const assignedUser = users.find(u => u.uid === formData.assignedTo);
+      const selectedClient = clients.find(c => c.id === formData.clientId); // ✅ NEW
       
       await updateDoc(doc(db, 'tasks', editingTask.id), {
         title: formData.title,
@@ -322,6 +349,8 @@ export const Tasks = () => {
         assignedTo: formData.assignedTo,
         assignedToName: assignedUser?.displayName || '',
         dueDate: Timestamp.fromDate(new Date(formData.dueDate)),
+        clientId: formData.clientId || null, // ✅ NEW
+        clientName: selectedClient?.name || null, // ✅ NEW
       });
 
       if (formData.assignedTo !== editingTask.assignedTo) {
@@ -370,7 +399,6 @@ export const Tasks = () => {
     }
   };
 
-  // ✅ Fixed: Status change with points calculation
   const handleStatusChange = async (taskId: string, newStatus: 'pending' | 'in-progress' | 'completed') => {
     try {
       const task = tasks.find(t => t.id === taskId);
@@ -386,7 +414,6 @@ export const Tasks = () => {
 
       const updatedStatusHistory = [...(task.statusHistory || []), statusUpdate];
 
-      // ✅ Calculate points when completing task
       if (newStatus === 'completed' && !task.completedAt) {
         const completedAt = now;
         const completionTimeHours = differenceInHours(completedAt, task.assignedAt);
@@ -401,12 +428,10 @@ export const Tasks = () => {
           statusHistory: updatedStatusHistory
         });
 
-        // Update user stats
         if (currentUser?.uid === task.assignedTo) {
           await updateUserStats(task.assignedTo, points, completionTimeHours);
         }
 
-        // Notify creator
         if (task.createdBy !== currentUser?.uid) {
           await createNotification(
             task.createdBy,
@@ -493,6 +518,7 @@ export const Tasks = () => {
       priority: 'medium',
       assignedTo: '',
       dueDate: '',
+      clientId: '', // ✅ NEW
     });
   };
 
@@ -505,33 +531,36 @@ export const Tasks = () => {
       priority: task.priority,
       assignedTo: task.assignedTo,
       dueDate: task.dueDate.toISOString().split('T')[0],
+      clientId: task.clientId || '', // ✅ NEW
     });
     setShowModal(true);
   };
 
+  // ✅ Updated filtering with client filter
   const filteredTasks = tasks.filter(task => {
     const matchesSearch = task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          task.description.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = filterStatus === 'all' || task.status === filterStatus;
     const matchesPriority = filterPriority === 'all' || task.priority === filterPriority;
+    const matchesClient = filterClient === 'all' || task.clientId === filterClient;
     
-    return matchesSearch && matchesStatus && matchesPriority;
+    return matchesSearch && matchesStatus && matchesPriority && matchesClient;
   });
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
-      case 'high': return 'bg-red-100 text-red-700 border-red-200';
-      case 'medium': return 'bg-yellow-100 text-yellow-700 border-yellow-200';
-      case 'low': return 'bg-green-100 text-green-700 border-green-200';
-      default: return 'bg-gray-100 text-gray-700 border-gray-200';
+      case 'high': return 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800';
+      case 'medium': return 'bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-900/20 dark:text-yellow-400 dark:border-yellow-800';
+      case 'low': return 'bg-green-100 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-400 dark:border-green-800';
+      default: return 'bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-900/20 dark:text-gray-400 dark:border-gray-800';
     }
   };
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'completed': return <CheckCircle className="h-5 w-5 text-green-600" />;
-      case 'in-progress': return <Clock className="h-5 w-5 text-blue-600" />;
-      case 'pending': return <AlertCircle className="h-5 w-5 text-gray-600" />;
+      case 'completed': return <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400" />;
+      case 'in-progress': return <Clock className="h-5 w-5 text-blue-600 dark:text-blue-400" />;
+      case 'pending': return <AlertCircle className="h-5 w-5 text-gray-600 dark:text-gray-400" />;
       default: return <Clock className="h-5 w-5 text-gray-600" />;
     }
   };
@@ -542,9 +571,9 @@ export const Tasks = () => {
 
   const getRoleBadgeColor = (role: string) => {
     switch (role) {
-      case 'superadmin': return 'bg-red-100 text-red-700';
-      case 'admin': return 'bg-yellow-100 text-yellow-700';
-      case 'member': return 'bg-blue-100 text-blue-700';
+      case 'superadmin': return 'bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400';
+      case 'admin': return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-400';
+      case 'member': return 'bg-blue-100 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400';
       default: return 'bg-gray-100 text-gray-700';
     }
   };
@@ -565,8 +594,8 @@ export const Tasks = () => {
     <div>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Tasks</h1>
-          <p className="text-gray-600 mt-1">Manage and track your team's tasks</p>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Tasks</h1>
+          <p className="text-gray-600 dark:text-gray-400 mt-1">Manage and track your team's tasks</p>
         </div>
         {(userRole === 'superadmin' || userRole === 'admin') && (
           <button onClick={() => setShowModal(true)} className="btn-primary flex items-center">
@@ -577,35 +606,35 @@ export const Tasks = () => {
       </div>
 
       {success && (
-        <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
-          <p className="text-sm text-green-600">{success}</p>
+        <div className="mb-6 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+          <p className="text-sm text-green-600 dark:text-green-400">{success}</p>
         </div>
       )}
 
       {error && (
-        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
-          <p className="text-sm text-red-600">{error}</p>
+        <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+          <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
         </div>
       )}
 
-      {/* Filters */}
-      <div className="card mb-6">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      {/* ✅ Updated Filters with Client Filter */}
+      <div className="card mb-6 dark:bg-slate-900 dark:border-slate-800">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400 dark:text-gray-500" />
             <input
               type="text"
               placeholder="Search tasks..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
             />
           </div>
 
           <select
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+            className="px-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
           >
             <option value="all">All Status</option>
             <option value="pending">Pending</option>
@@ -616,12 +645,27 @@ export const Tasks = () => {
           <select
             value={filterPriority}
             onChange={(e) => setFilterPriority(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+            className="px-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
           >
             <option value="all">All Priority</option>
             <option value="low">Low</option>
             <option value="medium">Medium</option>
             <option value="high">High</option>
+          </select>
+
+          {/* ✅ Client Filter */}
+          <select
+            value={filterClient}
+            onChange={(e) => setFilterClient(e.target.value)}
+            className="px-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
+          >
+            <option value="all">All Clients</option>
+            <option value="">No Client</option>
+            {clients.map((client) => (
+              <option key={client.id} value={client.id}>
+                {client.name}
+              </option>
+            ))}
           </select>
         </div>
       </div>
@@ -629,25 +673,31 @@ export const Tasks = () => {
       {/* Tasks Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
         {filteredTasks.map((task) => (
-          <div key={task.id} className="card hover:shadow-lg transition-shadow">
+          <div key={task.id} className="card hover:shadow-lg transition-shadow dark:bg-slate-900 dark:border-slate-800">
             <div className="flex items-start justify-between mb-3">
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-2 flex-wrap gap-2">
                 {getStatusIcon(task.status)}
                 <span className={`px-3 py-1 rounded-full text-xs font-medium border ${getPriorityColor(task.priority)}`}>
                   {task.priority}
                 </span>
-                {/* ✅ Show points if task completed */}
                 {task.isEarlyComplete && task.points && (
-                  <span className="flex items-center px-2 py-1 bg-yellow-100 text-yellow-700 rounded-full text-xs font-medium">
+                  <span className="flex items-center px-2 py-1 bg-yellow-100 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-400 rounded-full text-xs font-medium">
                     <Award className="h-3 w-3 mr-1" />
                     +{task.points}
+                  </span>
+                )}
+                {/* ✅ Client Badge */}
+                {task.clientName && (
+                  <span className="flex items-center px-2 py-1 bg-purple-100 dark:bg-purple-900/20 text-purple-700 dark:text-purple-400 rounded-full text-xs font-medium">
+                    <Building2 className="h-3 w-3 mr-1" />
+                    {task.clientName}
                   </span>
                 )}
               </div>
               <div className="flex items-center space-x-1">
                 <button
                   onClick={() => openChatModal(task)}
-                  className="relative p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                  className="relative p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
                   title="View discussion"
                 >
                   <MessageCircle className="h-4 w-4" />
@@ -662,14 +712,14 @@ export const Tasks = () => {
                   <>
                     <button
                       onClick={() => openEditModal(task)}
-                      className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                      className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
                       title="Edit task"
                     >
                       <Edit2 className="h-4 w-4" />
                     </button>
                     <button
                       onClick={() => handleDeleteTask(task.id)}
-                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
                       title="Delete task"
                     >
                       <Trash2 className="h-4 w-4" />
@@ -679,49 +729,48 @@ export const Tasks = () => {
               </div>
             </div>
 
-            <h3 className="font-semibold text-lg text-gray-900 mb-2">{task.title}</h3>
-            <p className="text-sm text-gray-600 mb-4 line-clamp-2">{task.description}</p>
+            <h3 className="font-semibold text-lg text-gray-900 dark:text-white mb-2">{task.title}</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4 line-clamp-2">{task.description}</p>
 
             <div className="space-y-2 mb-4 text-sm">
               <div className="flex items-center justify-between">
-                <span className="text-gray-600">Assigned to:</span>
-                <span className="font-medium text-gray-900">{task.assignedToName}</span>
+                <span className="text-gray-600 dark:text-gray-400">Assigned to:</span>
+                <span className="font-medium text-gray-900 dark:text-white">{task.assignedToName}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-gray-600">Assigned at:</span>
-                <span className="font-medium text-gray-900">{format(task.assignedAt, 'MMM d, h:mm a')}</span>
+                <span className="text-gray-600 dark:text-gray-400">Assigned at:</span>
+                <span className="font-medium text-gray-900 dark:text-white">{format(task.assignedAt, 'MMM d, h:mm a')}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-gray-600">Due date:</span>
-                <span className="font-medium text-gray-900">{format(task.dueDate, 'MMM d, yyyy')}</span>
+                <span className="text-gray-600 dark:text-gray-400">Due date:</span>
+                <span className="font-medium text-gray-900 dark:text-white">{format(task.dueDate, 'MMM d, yyyy')}</span>
               </div>
-              {/* ✅ Show completion details */}
               {task.completedAt && (
                 <>
                   <div className="flex items-center justify-between">
-                    <span className="text-gray-600">Completed:</span>
-                    <span className="font-medium text-green-600">{format(task.completedAt, 'MMM d, h:mm a')}</span>
+                    <span className="text-gray-600 dark:text-gray-400">Completed:</span>
+                    <span className="font-medium text-green-600 dark:text-green-400">{format(task.completedAt, 'MMM d, h:mm a')}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-gray-600">Time taken:</span>
-                    <span className="font-medium text-gray-900">{formatCompletionTime(task.completionTimeHours || 0)}</span>
+                    <span className="text-gray-600 dark:text-gray-400">Time taken:</span>
+                    <span className="font-medium text-gray-900 dark:text-white">{formatCompletionTime(task.completionTimeHours || 0)}</span>
                   </div>
                 </>
               )}
               {task.createdByName && (
                 <div className="flex items-center justify-between">
-                  <span className="text-gray-600">Created by:</span>
-                  <span className="font-medium text-gray-900">{task.createdByName}</span>
+                  <span className="text-gray-600 dark:text-gray-400">Created by:</span>
+                  <span className="font-medium text-gray-900 dark:text-white">{task.createdByName}</span>
                 </div>
               )}
             </div>
 
-            <div className="pt-4 border-t border-gray-100">
-              <label className="block text-xs font-medium text-gray-700 mb-2">Update Status:</label>
+            <div className="pt-4 border-t border-gray-100 dark:border-slate-800">
+              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Update Status:</label>
               <select
                 value={task.status}
                 onChange={(e) => handleStatusChange(task.id, e.target.value as any)}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
                 disabled={task.status === 'completed'}
               >
                 <option value="pending">Pending</option>
@@ -734,70 +783,70 @@ export const Tasks = () => {
       </div>
 
       {filteredTasks.length === 0 && (
-        <div className="card text-center py-12">
-          <CheckCircle className="h-12 w-12 text-gray-300 mx-auto mb-4" />
-          <p className="text-gray-500">
+        <div className="card text-center py-12 dark:bg-slate-900 dark:border-slate-800">
+          <CheckCircle className="h-12 w-12 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
+          <p className="text-gray-500 dark:text-gray-400">
             {tasks.length === 0 ? 'No tasks assigned to you yet' : 'No tasks match your filters'}
           </p>
           {(userRole === 'superadmin' || userRole === 'admin') && tasks.length === 0 && (
-            <button onClick={() => setShowModal(true)} className="mt-4 text-primary-600 font-medium">
+            <button onClick={() => setShowModal(true)} className="mt-4 text-primary-600 dark:text-primary-400 font-medium">
               Create your first task
             </button>
           )}
         </div>
       )}
 
-      {/* Create/Edit Modal - SAME AS BEFORE */}
+      {/* ✅ Create/Edit Modal with Client Selection */}
       {showModal && (userRole === 'superadmin' || userRole === 'admin') && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
-            <h2 className="text-2xl font-bold text-gray-900 mb-6">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
               {editingTask ? 'Edit Task' : 'Create New Task'}
             </h2>
 
             {error && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
+              <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-600 dark:text-red-400">
                 {error}
               </div>
             )}
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Task Title *
                 </label>
                 <input
                   type="text"
                   value={formData.title}
                   onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
                   placeholder="Enter task title"
                   disabled={loading}
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Description
                 </label>
                 <textarea
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   rows={3}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
                   placeholder="Enter task description"
                   disabled={loading}
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Assign To *
                 </label>
                 <select
                   value={formData.assignedTo}
                   onChange={(e) => setFormData({ ...formData, assignedTo: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
                   disabled={loading}
                 >
                   <option value="">Select team member</option>
@@ -809,15 +858,35 @@ export const Tasks = () => {
                 </select>
               </div>
 
+              {/* ✅ Client Selection */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Client (Optional)
+                </label>
+                <select
+                  value={formData.clientId}
+                  onChange={(e) => setFormData({ ...formData, clientId: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
+                  disabled={loading}
+                >
+                  <option value="">No Client</option>
+                  {clients.map((client) => (
+                    <option key={client.id} value={client.id}>
+                      {client.name} {client.company && `(${client.company})`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     Priority *
                   </label>
                   <select
                     value={formData.priority}
                     onChange={(e) => setFormData({ ...formData, priority: e.target.value as any })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    className="w-full px-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
                     disabled={loading}
                   >
                     <option value="low">Low</option>
@@ -827,13 +896,13 @@ export const Tasks = () => {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     Status *
                   </label>
                   <select
                     value={formData.status}
                     onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    className="w-full px-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
                     disabled={loading}
                   >
                     <option value="pending">Pending</option>
@@ -844,14 +913,14 @@ export const Tasks = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Due Date *
                 </label>
                 <input
                   type="date"
                   value={formData.dueDate}
                   onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
                   disabled={loading}
                   min={new Date().toISOString().split('T')[0]}
                 />
@@ -883,14 +952,14 @@ export const Tasks = () => {
         </div>
       )}
 
-      {/* Chat Modal - SAME AS BEFORE */}
+      {/* Chat Modal - Same as before with dark mode support */}
       {showChatModal && selectedTask && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full h-[600px] flex flex-col">
-            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl max-w-2xl w-full h-[600px] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-slate-800">
               <div className="flex-1">
-                <h2 className="text-lg font-bold text-gray-900">{selectedTask.title}</h2>
-                <p className="text-sm text-gray-500">Task Discussion</p>
+                <h2 className="text-lg font-bold text-gray-900 dark:text-white">{selectedTask.title}</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Task Discussion</p>
               </div>
               <button
                 onClick={() => {
@@ -898,15 +967,15 @@ export const Tasks = () => {
                   setSelectedTask(null);
                   setComments([]);
                 }}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                className="p-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
               >
-                <X className="h-5 w-5 text-gray-600" />
+                <X className="h-5 w-5 text-gray-600 dark:text-gray-400" />
               </button>
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {comments.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-gray-400">
+                <div className="flex flex-col items-center justify-center h-full text-gray-400 dark:text-gray-500">
                   <MessageCircle className="h-12 w-12 mb-2" />
                   <p className="text-sm">No messages yet. Start the discussion!</p>
                 </div>
@@ -921,7 +990,7 @@ export const Tasks = () => {
                     >
                       <div className={`max-w-[70%] ${isCurrentUser ? 'order-2' : 'order-1'}`}>
                         <div className="flex items-center space-x-2 mb-1">
-                          <span className="text-xs font-medium text-gray-900">
+                          <span className="text-xs font-medium text-gray-900 dark:text-white">
                             {comment.sentByName}
                           </span>
                           <span className={`text-xs px-2 py-0.5 rounded-full ${getRoleBadgeColor(comment.sentByRole)}`}>
@@ -932,12 +1001,12 @@ export const Tasks = () => {
                           className={`rounded-lg p-3 ${
                             isCurrentUser
                               ? 'bg-primary-600 text-white'
-                              : 'bg-gray-100 text-gray-900'
+                              : 'bg-gray-100 dark:bg-slate-800 text-gray-900 dark:text-white'
                           }`}
                         >
                           <p className="text-sm whitespace-pre-wrap break-words">{comment.message}</p>
                         </div>
-                        <p className="text-xs text-gray-500 mt-1">
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                           {format(comment.timestamp, 'MMM d, h:mm a')}
                         </p>
                       </div>
@@ -947,7 +1016,7 @@ export const Tasks = () => {
               )}
             </div>
 
-            <div className="p-4 border-t border-gray-200">
+            <div className="p-4 border-t border-gray-200 dark:border-slate-800">
               <div className="flex items-end space-x-2">
                 <textarea
                   value={newComment}
@@ -960,7 +1029,7 @@ export const Tasks = () => {
                   }}
                   placeholder="Type your message... (Shift+Enter for new line)"
                   rows={2}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
+                  className="flex-1 px-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
                   disabled={sendingMessage}
                 />
                 <button
@@ -971,7 +1040,7 @@ export const Tasks = () => {
                   <Send className="h-5 w-5" />
                 </button>
               </div>
-              <p className="text-xs text-gray-500 mt-2">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
                 Press Enter to send, Shift+Enter for new line
               </p>
             </div>

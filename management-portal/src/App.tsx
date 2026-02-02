@@ -7,10 +7,12 @@ import { Login } from './pages/Login';
 import { Dashboard } from './pages/dashboard.tsx';
 import { Tasks } from './pages/Tasks';
 import { Team } from './pages/Team';
+import { Clients } from './pages/Clients'; // ✅ ADD
+import { ClientDetail } from './pages/ClientDetail'; // ✅ ADD
 import { Setup } from './pages/Setup';
 import { Meetings } from './pages/Meetings';
 import { Settings } from './pages/Settings';
-import { Reports } from './pages/Reports'; // ✅ Add this import
+import { Reports } from './pages/Reports';
 
 function App() {
   return (
@@ -18,16 +20,17 @@ function App() {
       <NotificationProvider>
         <BrowserRouter>
           <Routes>
-          <Route
-            path="/setup"
-            element={
-              <Layout>
-                <Setup />
-              </Layout>
-            }
-          />
+            <Route
+              path="/setup"
+              element={
+                <Layout>
+                  <Setup />
+                </Layout>
+              }
+            />
 
             <Route path="/login" element={<Login />} />
+            
             <Route
               path="/dashboard"
               element={
@@ -38,6 +41,7 @@ function App() {
                 </ProtectedRoute>
               }
             />
+            
             <Route
               path="/tasks"
               element={
@@ -48,12 +52,36 @@ function App() {
                 </ProtectedRoute>
               }
             />
+            
             <Route
               path="/team"
               element={
                 <ProtectedRoute allowedRoles={['superadmin', 'admin']}>
                   <Layout>
                     <Team />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
+
+            {/* ✅ Clients Routes */}
+            <Route
+              path="/clients"
+              element={
+                <ProtectedRoute allowedRoles={['superadmin', 'admin', 'member']}>
+                  <Layout>
+                    <Clients />
+                  </Layout>
+                </ProtectedRoute>
+              }
+            />
+            
+            <Route
+              path="/clients/:clientId"
+              element={
+                <ProtectedRoute allowedRoles={['superadmin', 'admin', 'member']}>
+                  <Layout>
+                    <ClientDetail />
                   </Layout>
                 </ProtectedRoute>
               }
@@ -69,7 +97,7 @@ function App() {
                 </ProtectedRoute>
               }
             />
-            {/* ✅ Add Reports Route - Only for Super Admin */}
+            
             <Route
               path="/reports"
               element={
@@ -80,6 +108,7 @@ function App() {
                 </ProtectedRoute>
               }
             />
+            
             <Route
               path="/settings"
               element={
@@ -90,6 +119,7 @@ function App() {
                 </ProtectedRoute>
               }
             />
+            
             <Route path="/" element={<Navigate to="/login" replace />} />
             <Route path="*" element={<Navigate to="/login" replace />} />
           </Routes>

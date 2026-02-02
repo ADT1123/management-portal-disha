@@ -4,7 +4,6 @@ import { useAuth } from '../../contexts/AuthContext';
 import { 
   collection, 
   query, 
-  getDocs, 
   orderBy, 
   limit,
   where,
@@ -19,6 +18,7 @@ import {
   LayoutDashboard, 
   CheckSquare, 
   Users, 
+  Building2,
   Calendar, 
   Settings,
   LogOut,
@@ -29,7 +29,6 @@ import {
   Medal,
   Star,
   BellDot,
-  Check,
   CheckCheck,
   MessageCircle
 } from 'lucide-react';
@@ -182,35 +181,17 @@ export const Layout = ({ children }: LayoutProps) => {
     return notificationDate.toLocaleDateString();
   };
 
-  // Navigation items - Team Chat added BEFORE Settings
+  // Navigation items with Clients
   const navItems = [
     { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { path: '/tasks', icon: CheckSquare, label: 'Tasks' },
     { path: '/team', icon: Users, label: 'Team' },
+    { path: '/clients', icon: Building2, label: 'Clients' },
     { path: '/meetings', icon: Calendar, label: 'Meetings' },
     { path: '/reports', icon: Star, label: 'Reports' },
-    { path: 'chat', icon: MessageCircle, label: 'Team Chat', isChat: true }, // Special chat item
+    { path: 'chat', icon: MessageCircle, label: 'Team Chat', isChat: true },
     { path: '/settings', icon: Settings, label: 'Settings' },
-
   ];
-
-  const getRankIcon = (index: number) => {
-    switch (index) {
-      case 0: return <Trophy className="h-5 w-5 text-yellow-500" />;
-      case 1: return <Medal className="h-5 w-5 text-gray-400" />;
-      case 2: return <Medal className="h-5 w-5 text-orange-600" />;
-      default: return <Star className="h-4 w-4 text-gray-400" />;
-    }
-  };
-
-  const getRankColor = (index: number) => {
-    switch (index) {
-      case 0: return 'bg-yellow-50 border-yellow-200';
-      case 1: return 'bg-gray-50 border-gray-200';
-      case 2: return 'bg-orange-50 border-orange-200';
-      default: return 'bg-white border-gray-100';
-    }
-  };
 
   return (
     <div className="min-h-screen bg-gray-50 flex">

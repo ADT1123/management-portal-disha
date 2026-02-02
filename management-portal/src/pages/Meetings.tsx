@@ -8,12 +8,13 @@ import {
   deleteDoc,
   doc,
   orderBy,
+  where,
   Timestamp
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { createNotification } from '../utils/notifications';
-import { Plus, Calendar, Clock, MapPin, Users, Trash2, Edit2, FileText, X, CheckCircle2, Circle, XCircle } from 'lucide-react';
+import { Plus, Calendar, Clock, MapPin, Users, Trash2, Edit2, FileText, X, CheckCircle2, Circle, XCircle, Building2 } from 'lucide-react';
 import { format, isPast, isToday, isTomorrow, isThisWeek, isThisMonth, startOfDay, endOfDay } from 'date-fns';
 
 interface Meeting {
@@ -28,12 +29,21 @@ interface Meeting {
   mom?: string;
   status: 'scheduled' | 'completed' | 'cancelled';
   createdAt: Date;
+  clientId?: string; // ✅ NEW
+  clientName?: string; // ✅ NEW
+}
+
+interface Client {
+  id: string;
+  name: string;
+  company?: string;
 }
 
 export const Meetings = () => {
   const { currentUser, userRole, userData } = useAuth();
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [users, setUsers] = useState<any[]>([]);
+  const [clients, setClients] = useState<Client[]>([]); // ✅ NEW
   const [showModal, setShowModal] = useState(false);
   const [showMomModal, setShowMomModal] = useState(false);
   const [showStatusModal, setShowStatusModal] = useState(false);
@@ -44,6 +54,7 @@ export const Meetings = () => {
   const [success, setSuccess] = useState('');
   const [momText, setMomText] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<'scheduled' | 'completed' | 'cancelled'>('scheduled');
+  const [filterClient, setFilterClient] = useState<string>('all'); // ✅ NEW
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -51,12 +62,14 @@ export const Meetings = () => {
     time: '',
     location: '',
     attendees: [] as string[],
+    clientId: '', // ✅ NEW
   });
 
   useEffect(() => {
     if (currentUser && userRole) {
       fetchMeetings();
       fetchUsers();
+      fetchClients(); // ✅ NEW
     }
   }, [currentUser, userRole]);
 
@@ -94,6 +107,20 @@ export const Meetings = () => {
     }
   };
 
+  // ✅ Fetch Clients
+  const fetchClients = async () => {
+    try {
+      const snapshot = await getDocs(collection(db, 'clients'));
+      const clientsData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      })) as Client[];
+      setClients(clientsData);
+    } catch (error) {
+      console.error('Error fetching clients:', error);
+    }
+  };
+
   const handleCreateMeeting = async () => {
     if (!currentUser || !formData.title || !formData.date || !formData.time) {
       setError('Please fill all required fields');
@@ -104,6 +131,7 @@ export const Meetings = () => {
     setError('');
     try {
       const meetingDateTime = new Date(`${formData.date}T${formData.time}`);
+      const selectedClient = clients.find(c => c.id === formData.clientId); // ✅ NEW
 
       await addDoc(collection(db, 'meetings'), {
         title: formData.title,
@@ -116,6 +144,8 @@ export const Meetings = () => {
         mom: '',
         status: 'scheduled',
         createdAt: Timestamp.now(),
+        clientId: formData.clientId || null, // ✅ NEW
+        clientName: selectedClient?.name || null, // ✅ NEW
       });
 
       // Notify attendees
@@ -123,7 +153,7 @@ export const Meetings = () => {
         await createNotification(
           attendeeId,
           'New Meeting Scheduled',
-          `Meeting: ${formData.title} on ${format(meetingDateTime, 'PPP')}`,
+          `Meeting: ${formData.title}${selectedClient ? ` with ${selectedClient.name}` : ''} on ${format(meetingDateTime, 'PPP')}`,
           'meeting'
         );
       }
@@ -148,6 +178,7 @@ export const Meetings = () => {
     setLoading(true);
     try {
       const meetingDateTime = new Date(`${formData.date}T${formData.time}`);
+      const selectedClient = clients.find(c => c.id === formData.clientId); // ✅ NEW
 
       await updateDoc(doc(db, 'meetings', editingMeeting.id), {
         title: formData.title,
@@ -155,9 +186,10 @@ export const Meetings = () => {
         date: Timestamp.fromDate(meetingDateTime),
         location: formData.location,
         attendees: formData.attendees,
+        clientId: formData.clientId || null, // ✅ NEW
+        clientName: selectedClient?.name || null, // ✅ NEW
       });
 
-      // ✅ Notify attendees about meeting update
       for (const attendeeId of formData.attendees) {
         await createNotification(
           attendeeId,
@@ -243,7 +275,6 @@ export const Meetings = () => {
     setShowMomModal(true);
   };
 
-  // ✅ Updated handleSaveMom with notification
   const handleSaveMom = async () => {
     if (!selectedMeeting || !currentUser) return;
 
@@ -255,7 +286,6 @@ export const Meetings = () => {
         momUpdatedBy: currentUser.uid,
       });
 
-      // ✅ Notify all attendees about MOM update
       const momNotificationTitle = 'MOM Updated';
       const momNotificationMessage = `Minutes of Meeting added for: ${selectedMeeting.title}`;
       
@@ -291,6 +321,7 @@ export const Meetings = () => {
       time: '',
       location: '',
       attendees: [],
+      clientId: '', // ✅ NEW
     });
   };
 
@@ -303,6 +334,7 @@ export const Meetings = () => {
       time: format(meeting.date, 'HH:mm'),
       location: meeting.location,
       attendees: meeting.attendees,
+      clientId: meeting.clientId || '', // ✅ NEW
     });
     setShowModal(true);
   };
@@ -332,7 +364,12 @@ export const Meetings = () => {
     const upcoming: Meeting[] = [];
     const past: Meeting[] = [];
 
-    meetings.forEach(meeting => {
+    // ✅ Filter by client
+    const filteredMeetings = filterClient === 'all' 
+      ? meetings 
+      : meetings.filter(m => filterClient === '' ? !m.clientId : m.clientId === filterClient);
+
+    filteredMeetings.forEach(meeting => {
       const meetingDate = meeting.date;
       
       if (meetingDate < todayStart) {
@@ -363,54 +400,61 @@ export const Meetings = () => {
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'completed':
-        return <CheckCircle2 className="h-5 w-5 text-green-600" />;
+        return <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />;
       case 'cancelled':
-        return <XCircle className="h-5 w-5 text-red-600" />;
+        return <XCircle className="h-5 w-5 text-red-600 dark:text-red-400" />;
       default:
-        return <Circle className="h-5 w-5 text-blue-600" />;
+        return <Circle className="h-5 w-5 text-blue-600 dark:text-blue-400" />;
     }
   };
 
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'completed':
-        return 'bg-green-100 text-green-700';
+        return 'bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400';
       case 'cancelled':
-        return 'bg-red-100 text-red-700';
+        return 'bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400';
       default:
-        return 'bg-blue-100 text-blue-700';
+        return 'bg-blue-100 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400';
     }
   };
 
   const renderMeetingCard = (meeting: Meeting) => (
-    <div key={meeting.id} className={`card hover:shadow-md transition-shadow ${meeting.status === 'cancelled' ? 'opacity-60' : ''}`}>
+    <div key={meeting.id} className={`card hover:shadow-md transition-shadow dark:bg-slate-900 dark:border-slate-800 ${meeting.status === 'cancelled' ? 'opacity-60' : ''}`}>
       <div className="flex items-start justify-between mb-4">
         <div className="flex-1">
-          <div className="flex items-center space-x-2 mb-2">
-            <h3 className="text-xl font-semibold text-gray-900">{meeting.title}</h3>
+          <div className="flex items-center space-x-2 mb-2 flex-wrap gap-2">
+            <h3 className="text-xl font-semibold text-gray-900 dark:text-white">{meeting.title}</h3>
             <span className={`px-2.5 py-1 text-xs font-medium rounded-full ${getStatusColor(meeting.status)}`}>
               {meeting.status.charAt(0).toUpperCase() + meeting.status.slice(1)}
             </span>
+            {/* ✅ Client Badge */}
+            {meeting.clientName && (
+              <span className="flex items-center px-2 py-1 bg-purple-100 dark:bg-purple-900/20 text-purple-700 dark:text-purple-400 rounded-full text-xs font-medium">
+                <Building2 className="h-3 w-3 mr-1" />
+                {meeting.clientName}
+              </span>
+            )}
           </div>
-          {meeting.description && <p className="text-gray-600 mb-3">{meeting.description}</p>}
+          {meeting.description && <p className="text-gray-600 dark:text-gray-400 mb-3">{meeting.description}</p>}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-            <div className="flex items-center text-gray-700">
-              <Calendar className="h-4 w-4 mr-2 text-primary-600" />
+            <div className="flex items-center text-gray-700 dark:text-gray-300">
+              <Calendar className="h-4 w-4 mr-2 text-primary-600 dark:text-primary-400" />
               <span>{format(meeting.date, 'PPP')}</span>
             </div>
-            <div className="flex items-center text-gray-700">
-              <Clock className="h-4 w-4 mr-2 text-primary-600" />
+            <div className="flex items-center text-gray-700 dark:text-gray-300">
+              <Clock className="h-4 w-4 mr-2 text-primary-600 dark:text-primary-400" />
               <span>{format(meeting.date, 'p')}</span>
             </div>
             {meeting.location && (
-              <div className="flex items-center text-gray-700">
-                <MapPin className="h-4 w-4 mr-2 text-primary-600" />
+              <div className="flex items-center text-gray-700 dark:text-gray-300">
+                <MapPin className="h-4 w-4 mr-2 text-primary-600 dark:text-primary-400" />
                 <span>{meeting.location}</span>
               </div>
             )}
-            <div className="flex items-center text-gray-700">
-              <Users className="h-4 w-4 mr-2 text-primary-600" />
+            <div className="flex items-center text-gray-700 dark:text-gray-300">
+              <Users className="h-4 w-4 mr-2 text-primary-600 dark:text-primary-400" />
               <span>{meeting.attendees.length} attendees</span>
             </div>
           </div>
@@ -420,7 +464,7 @@ export const Meetings = () => {
           {canUpdateStatus && (
             <button
               onClick={() => openStatusModal(meeting)}
-              className="p-2 text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
+              className="p-2 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded-lg transition-colors"
               title="Update status"
             >
               {getStatusIcon(meeting.status)}
@@ -431,8 +475,8 @@ export const Meetings = () => {
             onClick={() => openMomModal(meeting)}
             className={`p-2 rounded-lg transition-colors ${
               meeting.mom 
-                ? 'text-green-600 hover:bg-green-50' 
-                : 'text-gray-400 hover:bg-gray-100'
+                ? 'text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20' 
+                : 'text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-slate-800'
             }`}
             title={meeting.mom ? 'View MOM' : 'Add MOM'}
           >
@@ -443,14 +487,14 @@ export const Meetings = () => {
             <>
               <button
                 onClick={() => openEditModal(meeting)}
-                className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
                 title="Edit meeting"
               >
                 <Edit2 className="h-5 w-5" />
               </button>
               <button
                 onClick={() => handleDeleteMeeting(meeting.id)}
-                className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
                 title="Delete meeting"
               >
                 <Trash2 className="h-5 w-5" />
@@ -461,15 +505,15 @@ export const Meetings = () => {
       </div>
 
       {meeting.attendees.length > 0 && (
-        <div className="pt-3 border-t border-gray-200">
-          <p className="text-xs font-medium text-gray-700 mb-2">Attendees:</p>
+        <div className="pt-3 border-t border-gray-200 dark:border-slate-800">
+          <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">Attendees:</p>
           <div className="flex flex-wrap gap-2">
             {meeting.attendees.map((attendeeId) => {
               const user = users.find(u => u.uid === attendeeId);
               return user ? (
                 <span
                   key={attendeeId}
-                  className="inline-flex items-center px-3 py-1 bg-primary-50 text-primary-700 rounded-full text-xs font-medium"
+                  className="inline-flex items-center px-3 py-1 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-400 rounded-full text-xs font-medium"
                 >
                   {user.displayName}
                 </span>
@@ -487,8 +531,8 @@ export const Meetings = () => {
     return (
       <div className="mb-8">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-2xl font-bold text-gray-900">{title}</h2>
-          <span className="text-sm text-gray-500 font-medium bg-gray-100 px-3 py-1 rounded-full">
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">{title}</h2>
+          <span className="text-sm text-gray-500 dark:text-gray-400 font-medium bg-gray-100 dark:bg-slate-800 px-3 py-1 rounded-full">
             {meetingsList.length} {meetingsList.length === 1 ? 'meeting' : 'meetings'}
           </span>
         </div>
@@ -503,26 +547,43 @@ export const Meetings = () => {
     <div>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Meetings</h1>
-          <p className="text-gray-600 mt-1">Schedule and manage team meetings</p>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Meetings</h1>
+          <p className="text-gray-600 dark:text-gray-400 mt-1">Schedule and manage team meetings</p>
         </div>
-        {canEditMeeting && (
-          <button onClick={() => setShowModal(true)} className="btn-primary flex items-center">
-            <Plus className="h-5 w-5 mr-2" />
-            Schedule Meeting
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          {/* ✅ Client Filter */}
+          <select
+            value={filterClient}
+            onChange={(e) => setFilterClient(e.target.value)}
+            className="px-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
+          >
+            <option value="all">All Clients</option>
+            <option value="">No Client</option>
+            {clients.map((client) => (
+              <option key={client.id} value={client.id}>
+                {client.name}
+              </option>
+            ))}
+          </select>
+
+          {canEditMeeting && (
+            <button onClick={() => setShowModal(true)} className="btn-primary flex items-center whitespace-nowrap">
+              <Plus className="h-5 w-5 mr-2" />
+              Schedule Meeting
+            </button>
+          )}
+        </div>
       </div>
 
       {success && (
-        <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
-          <p className="text-sm text-green-600">{success}</p>
+        <div className="mb-6 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+          <p className="text-sm text-green-600 dark:text-green-400">{success}</p>
         </div>
       )}
 
       {error && (
-        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
-          <p className="text-sm text-red-600">{error}</p>
+        <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+          <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
         </div>
       )}
 
@@ -534,112 +595,132 @@ export const Meetings = () => {
       {renderMeetingSection('Past Meetings', past)}
 
       {meetings.length === 0 && (
-        <div className="card text-center py-12">
-          <Calendar className="h-12 w-12 text-gray-300 mx-auto mb-4" />
-          <p className="text-gray-500">No meetings scheduled yet</p>
+        <div className="card text-center py-12 dark:bg-slate-900 dark:border-slate-800">
+          <Calendar className="h-12 w-12 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
+          <p className="text-gray-500 dark:text-gray-400">No meetings scheduled yet</p>
           {canEditMeeting && (
-            <button onClick={() => setShowModal(true)} className="mt-4 text-primary-600 font-medium">
+            <button onClick={() => setShowModal(true)} className="mt-4 text-primary-600 dark:text-primary-400 font-medium">
               Schedule your first meeting
             </button>
           )}
         </div>
       )}
 
-      {/* Create/Edit Meeting Modal */}
+      {/* ✅ Create/Edit Meeting Modal with Client Selection */}
       {showModal && canEditMeeting && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
-            <h2 className="text-2xl font-bold text-gray-900 mb-6">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
               {editingMeeting ? 'Edit Meeting' : 'Schedule Meeting'}
             </h2>
 
             {error && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">
+              <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-600 dark:text-red-400">
                 {error}
               </div>
             )}
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Meeting Title *
                 </label>
                 <input
                   type="text"
                   value={formData.title}
                   onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
                   placeholder="Enter meeting title"
                   disabled={loading}
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Description
                 </label>
                 <textarea
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   rows={3}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
                   placeholder="Enter meeting description"
                   disabled={loading}
                 />
               </div>
 
+              {/* ✅ Client Selection */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Client (Optional)
+                </label>
+                <select
+                  value={formData.clientId}
+                  onChange={(e) => setFormData({ ...formData, clientId: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
+                  disabled={loading}
+                >
+                  <option value="">No Client</option>
+                  {clients.map((client) => (
+                    <option key={client.id} value={client.id}>
+                      {client.name} {client.company && `(${client.company})`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     Date *
                   </label>
                   <input
                     type="date"
                     value={formData.date}
                     onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    className="w-full px-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
                     disabled={loading}
                     min={new Date().toISOString().split('T')[0]}
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     Time *
                   </label>
                   <input
                     type="time"
                     value={formData.time}
                     onChange={(e) => setFormData({ ...formData, time: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    className="w-full px-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
                     disabled={loading}
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Location
                 </label>
                 <input
                   type="text"
                   value={formData.location}
                   onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
                   placeholder="Meeting location or link"
                   disabled={loading}
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Select Attendees
                 </label>
-                <div className="max-h-48 overflow-y-auto border border-gray-300 rounded-lg p-3 space-y-2">
+                <div className="max-h-48 overflow-y-auto border border-gray-300 dark:border-slate-700 rounded-lg p-3 space-y-2 bg-white dark:bg-slate-800">
                   {users.map((user) => (
                     <label
                       key={user.uid}
-                      className="flex items-center space-x-3 p-2 hover:bg-gray-50 rounded cursor-pointer"
+                      className="flex items-center space-x-3 p-2 hover:bg-gray-50 dark:hover:bg-slate-700 rounded cursor-pointer"
                     >
                       <input
                         type="checkbox"
@@ -649,13 +730,13 @@ export const Meetings = () => {
                         disabled={loading}
                       />
                       <div className="flex-1">
-                        <p className="text-sm font-medium text-gray-900">{user.displayName}</p>
-                        <p className="text-xs text-gray-500 capitalize">{user.role}</p>
+                        <p className="text-sm font-medium text-gray-900 dark:text-white">{user.displayName}</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 capitalize">{user.role}</p>
                       </div>
                     </label>
                   ))}
                 </div>
-                <p className="text-xs text-gray-500 mt-2">
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
                   {formData.attendees.length} attendee(s) selected
                 </p>
               </div>
@@ -689,16 +770,16 @@ export const Meetings = () => {
       {/* Status Update Modal */}
       {showStatusModal && selectedMeeting && canUpdateStatus && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
-            <h2 className="text-2xl font-bold text-gray-900 mb-6">Update Meeting Status</h2>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl max-w-md w-full p-6">
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Update Meeting Status</h2>
 
             <div className="mb-6">
-              <p className="text-sm text-gray-600 mb-2">Meeting:</p>
-              <p className="font-semibold text-gray-900">{selectedMeeting.title}</p>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">Meeting:</p>
+              <p className="font-semibold text-gray-900 dark:text-white">{selectedMeeting.title}</p>
             </div>
 
             <div className="space-y-3 mb-6">
-              <label className="flex items-center p-4 border-2 border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+              <label className="flex items-center p-4 border-2 border-gray-200 dark:border-slate-700 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors">
                 <input
                   type="radio"
                   name="status"
@@ -708,15 +789,15 @@ export const Meetings = () => {
                   className="h-4 w-4 text-blue-600"
                 />
                 <div className="ml-3 flex items-center">
-                  <Circle className="h-5 w-5 text-blue-600 mr-2" />
+                  <Circle className="h-5 w-5 text-blue-600 dark:text-blue-400 mr-2" />
                   <div>
-                    <p className="font-medium text-gray-900">Scheduled</p>
-                    <p className="text-xs text-gray-500">Meeting is planned</p>
+                    <p className="font-medium text-gray-900 dark:text-white">Scheduled</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Meeting is planned</p>
                   </div>
                 </div>
               </label>
 
-              <label className="flex items-center p-4 border-2 border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+              <label className="flex items-center p-4 border-2 border-gray-200 dark:border-slate-700 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors">
                 <input
                   type="radio"
                   name="status"
@@ -726,15 +807,15 @@ export const Meetings = () => {
                   className="h-4 w-4 text-green-600"
                 />
                 <div className="ml-3 flex items-center">
-                  <CheckCircle2 className="h-5 w-5 text-green-600 mr-2" />
+                  <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 mr-2" />
                   <div>
-                    <p className="font-medium text-gray-900">Completed</p>
-                    <p className="text-xs text-gray-500">Meeting finished successfully</p>
+                    <p className="font-medium text-gray-900 dark:text-white">Completed</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Meeting finished successfully</p>
                   </div>
                 </div>
               </label>
 
-              <label className="flex items-center p-4 border-2 border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
+              <label className="flex items-center p-4 border-2 border-gray-200 dark:border-slate-700 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors">
                 <input
                   type="radio"
                   name="status"
@@ -744,10 +825,10 @@ export const Meetings = () => {
                   className="h-4 w-4 text-red-600"
                 />
                 <div className="ml-3 flex items-center">
-                  <XCircle className="h-5 w-5 text-red-600 mr-2" />
+                  <XCircle className="h-5 w-5 text-red-600 dark:text-red-400 mr-2" />
                   <div>
-                    <p className="font-medium text-gray-900">Cancelled</p>
-                    <p className="text-xs text-gray-500">Meeting was cancelled</p>
+                    <p className="font-medium text-gray-900 dark:text-white">Cancelled</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Meeting was cancelled</p>
                   </div>
                 </div>
               </label>
@@ -779,11 +860,11 @@ export const Meetings = () => {
       {/* MOM Modal */}
       {showMomModal && selectedMeeting && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-6">
               <div>
-                <h2 className="text-2xl font-bold text-gray-900">Minutes of Meeting</h2>
-                <p className="text-sm text-gray-600 mt-1">{selectedMeeting.title}</p>
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Minutes of Meeting</h2>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{selectedMeeting.title}</p>
               </div>
               <button
                 onClick={() => {
@@ -791,34 +872,40 @@ export const Meetings = () => {
                   setSelectedMeeting(null);
                   setMomText('');
                 }}
-                className="p-2 hover:bg-gray-100 rounded-lg"
+                className="p-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg"
               >
-                <X className="h-5 w-5 text-gray-600" />
+                <X className="h-5 w-5 text-gray-600 dark:text-gray-400" />
               </button>
             </div>
 
             <div className="space-y-4">
-              <div className="p-4 bg-gray-50 rounded-lg text-sm space-y-2">
+              <div className="p-4 bg-gray-50 dark:bg-slate-800 rounded-lg text-sm space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-gray-600">Date:</span>
-                  <span className="font-medium text-gray-900">
+                  <span className="text-gray-600 dark:text-gray-400">Date:</span>
+                  <span className="font-medium text-gray-900 dark:text-white">
                     {format(selectedMeeting.date, 'PPP p')}
                   </span>
                 </div>
                 {selectedMeeting.location && (
                   <div className="flex items-center justify-between">
-                    <span className="text-gray-600">Location:</span>
-                    <span className="font-medium text-gray-900">{selectedMeeting.location}</span>
+                    <span className="text-gray-600 dark:text-gray-400">Location:</span>
+                    <span className="font-medium text-gray-900 dark:text-white">{selectedMeeting.location}</span>
+                  </div>
+                )}
+                {selectedMeeting.clientName && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-600 dark:text-gray-400">Client:</span>
+                    <span className="font-medium text-gray-900 dark:text-white">{selectedMeeting.clientName}</span>
                   </div>
                 )}
                 <div className="flex items-center justify-between">
-                  <span className="text-gray-600">Attendees:</span>
-                  <span className="font-medium text-gray-900">
+                  <span className="text-gray-600 dark:text-gray-400">Attendees:</span>
+                  <span className="font-medium text-gray-900 dark:text-white">
                     {selectedMeeting.attendees.length} people
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-gray-600">Status:</span>
+                  <span className="text-gray-600 dark:text-gray-400">Status:</span>
                   <span className={`px-2.5 py-1 text-xs font-medium rounded-full ${getStatusColor(selectedMeeting.status)}`}>
                     {selectedMeeting.status.charAt(0).toUpperCase() + selectedMeeting.status.slice(1)}
                   </span>
@@ -826,20 +913,20 @@ export const Meetings = () => {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Meeting Notes
                 </label>
                 <textarea
                   value={momText}
                   onChange={(e) => setMomText(e.target.value)}
                   rows={12}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none bg-white dark:bg-slate-800 text-gray-900 dark:text-white"
                   placeholder={canEditMom ? "Enter meeting notes, decisions, and action items..." : "No notes added yet"}
                   disabled={!canEditMom || loading}
                   readOnly={!canEditMom}
                 />
                 {!canEditMom && (
-                  <p className="text-xs text-gray-500 mt-2">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
                     Only Super Admin can edit MOM
                   </p>
                 )}
