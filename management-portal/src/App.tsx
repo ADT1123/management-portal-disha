@@ -7,12 +7,13 @@ import { Login } from './pages/Login';
 import { Dashboard } from './pages/dashboard.tsx';
 import { Tasks } from './pages/Tasks';
 import { Team } from './pages/Team';
-import { Clients } from './pages/Clients'; // ✅ ADD
-import { ClientDetail } from './pages/ClientDetail'; // ✅ ADD
+import { Clients } from './pages/Clients';
+import { ClientDetail } from './pages/ClientDetail';
 import { Setup } from './pages/Setup';
 import { Meetings } from './pages/Meetings';
 import { Settings } from './pages/Settings';
 import { Reports } from './pages/Reports';
+import { ChatLayout } from './components/chat/ChatLayout.tsx'; // ✅ NEW - Chat System
 
 function App() {
   return (
@@ -123,6 +124,11 @@ function App() {
             <Route path="/" element={<Navigate to="/login" replace />} />
             <Route path="*" element={<Navigate to="/login" replace />} />
           </Routes>
+
+          {/* ✅ NEW - Floating Chat Button (Available on all authenticated pages) */}
+          <ProtectedRoute allowedRoles={['superadmin', 'admin', 'member']}>
+            <ChatLayout />
+          </ProtectedRoute>
         </BrowserRouter>
       </NotificationProvider>
     </AuthProvider>
