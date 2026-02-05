@@ -47,6 +47,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               email: user.email!,
               displayName: data.displayName,
               role: data.role as UserRole,
+              phone: data.phone,
               department: data.department,
               photoURL: data.photoURL,
               createdAt: data.createdAt?.toDate() || new Date(),

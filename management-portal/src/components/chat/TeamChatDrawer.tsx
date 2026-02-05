@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import {
   addDoc,
   collection,
@@ -11,10 +11,13 @@ import {
   doc,
   updateDoc,
   Timestamp,
+  getDocs,
+  startAfter,
+  QueryDocumentSnapshot,
 } from "firebase/firestore";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../contexts/AuthContext";
-import { X, Send, MessageCircle, Trash2, Loader2 } from "lucide-react";
+import { X, Send, MessageCircle, Trash2, Loader2, ChevronUp } from "lucide-react";
 import { format } from "date-fns";
 
 type ChatMessage = {
@@ -31,6 +34,9 @@ type TypingUser = {
   userName: string;
   timestamp: Timestamp;
 };
+
+const MESSAGES_PER_PAGE = 50; // Load only 50 messages at a time
+const TYPING_TIMEOUT = 2000;
 
 export const TeamChatDrawer = ({
   open,
@@ -49,13 +55,20 @@ export const TeamChatDrawer = ({
   const [sending, setSending] = useState(false);
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
   const [isVisible, setIsVisible] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot | null>(null);
+  
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+  const unsubscribeRef = useRef<(() => void) | null>(null);
+  const isInitialLoad = useRef(true);
 
   const isSuperAdmin = userData?.role === "superadmin";
 
-  // Handle drawer animation on open/close
+  // Handle drawer animation
   useEffect(() => {
     if (open) {
       setTimeout(() => setIsVisible(true), 10);
@@ -64,17 +77,97 @@ export const TeamChatDrawer = ({
     }
   }, [open]);
 
-  // Real-time listener for messages
+  // Scroll to bottom smoothly
+  const scrollToBottom = useCallback((smooth = true) => {
+    setTimeout(() => {
+      bottomRef.current?.scrollIntoView({ behavior: smooth ? "smooth" : "auto" });
+    }, 100);
+  }, []);
+
+  // Real-time listener for LATEST messages only (optimized)
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser || !open) return;
 
     const ref = collection(db, "teamChatMessages");
-    const q = query(ref, orderBy("createdAt", "asc"), limit(200));
+    const q = query(ref, orderBy("createdAt", "desc"), limit(MESSAGES_PER_PAGE));
+
+    // Clean up previous listener
+    if (unsubscribeRef.current) {
+      unsubscribeRef.current();
+    }
 
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
-        const next = snapshot.docs.map((d) => {
+        const newMessages = snapshot.docs
+          .map((d) => {
+            const data = d.data();
+            return {
+              id: d.id,
+              text: data.text || "",
+              senderId: data.senderId || "",
+              senderName: data.senderName || "Unknown",
+              senderDepartment: data.senderDepartment || "",
+              createdAt: data.createdAt?.toDate?.() ?? undefined,
+            } as ChatMessage;
+          })
+          .reverse(); // Reverse to show oldest first
+
+        setMessages(newMessages);
+        
+        // Store last document for pagination
+        if (snapshot.docs.length > 0) {
+          setLastDoc(snapshot.docs[snapshot.docs.length - 1]);
+        }
+        
+        // Check if more messages exist
+        setHasMore(snapshot.docs.length === MESSAGES_PER_PAGE);
+
+        // Scroll to bottom on initial load or new message
+        if (isInitialLoad.current || snapshot.docChanges().some(change => change.type === 'added')) {
+          scrollToBottom(isInitialLoad.current ? false : true);
+          isInitialLoad.current = false;
+        }
+      },
+      (error) => {
+        console.error("Error in chat listener:", error);
+      }
+    );
+
+    unsubscribeRef.current = unsubscribe;
+
+    return () => {
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
+    };
+  }, [currentUser, open, scrollToBottom]);
+
+  // Load older messages (pagination)
+  const loadMoreMessages = async () => {
+    if (!lastDoc || loadingMore || !hasMore) return;
+
+    setLoadingMore(true);
+    try {
+      const ref = collection(db, "teamChatMessages");
+      const q = query(
+        ref,
+        orderBy("createdAt", "desc"),
+        startAfter(lastDoc),
+        limit(MESSAGES_PER_PAGE)
+      );
+
+      const snapshot = await getDocs(q);
+      
+      if (snapshot.empty) {
+        setHasMore(false);
+        setLoadingMore(false);
+        return;
+      }
+
+      const olderMessages = snapshot.docs
+        .map((d) => {
           const data = d.data();
           return {
             id: d.id,
@@ -84,25 +177,23 @@ export const TeamChatDrawer = ({
             senderDepartment: data.senderDepartment || "",
             createdAt: data.createdAt?.toDate?.() ?? undefined,
           } as ChatMessage;
-        });
+        })
+        .reverse();
 
-        setMessages(next);
+      // Prepend older messages
+      setMessages((prev) => [...olderMessages, ...prev]);
+      setLastDoc(snapshot.docs[snapshot.docs.length - 1]);
+      setHasMore(snapshot.docs.length === MESSAGES_PER_PAGE);
+    } catch (error) {
+      console.error("Error loading more messages:", error);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
-        setTimeout(() => {
-          bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-        }, 100);
-      },
-      (error) => {
-        console.error("Error in chat listener:", error);
-      }
-    );
-
-    return () => unsubscribe();
-  }, [currentUser]);
-
-  // Real-time listener for typing indicators
+  // Real-time listener for typing indicators (optimized)
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser || !open) return;
 
     const typingRef = collection(db, "chatTyping");
     const unsubscribe = onSnapshot(typingRef, (snapshot) => {
@@ -125,7 +216,7 @@ export const TeamChatDrawer = ({
     });
 
     return () => unsubscribe();
-  }, [currentUser]);
+  }, [currentUser, open]);
 
   // Mark as read when opened
   useEffect(() => {
@@ -141,7 +232,8 @@ export const TeamChatDrawer = ({
     }
   }, [open]);
 
-  const updateTypingStatus = async () => {
+  // Update typing status (debounced)
+  const updateTypingStatus = useCallback(async () => {
     if (!currentUser || !userData) return;
 
     try {
@@ -150,6 +242,7 @@ export const TeamChatDrawer = ({
         userName: userData.displayName || "Someone",
         timestamp: serverTimestamp(),
       }).catch(async () => {
+        // Document doesn't exist, create it
         await addDoc(collection(db, "chatTyping"), {
           userName: userData.displayName || "Someone",
           timestamp: serverTimestamp(),
@@ -158,30 +251,42 @@ export const TeamChatDrawer = ({
     } catch (error) {
       console.error("Error updating typing status:", error);
     }
-  };
+  }, [currentUser, userData]);
 
+  // Clear typing status
+  const clearTypingStatus = useCallback(async () => {
+    if (!currentUser) return;
+    try {
+      await deleteDoc(doc(db, "chatTyping", currentUser.uid));
+    } catch (error) {
+      // Ignore errors
+    }
+  }, [currentUser]);
+
+  // Handle text change with typing indicator
   const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setText(e.target.value);
+    const newText = e.target.value;
+    setText(newText);
 
+    // Clear previous timeout
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
     }
 
-    if (e.target.value.trim()) {
+    // Update typing status if typing
+    if (newText.trim()) {
       updateTypingStatus();
 
-      typingTimeoutRef.current = setTimeout(async () => {
-        if (currentUser) {
-          try {
-            await deleteDoc(doc(db, "chatTyping", currentUser.uid));
-          } catch (error) {
-            // Ignore
-          }
-        }
-      }, 2000);
+      // Clear typing status after 2 seconds of no typing
+      typingTimeoutRef.current = setTimeout(() => {
+        clearTypingStatus();
+      }, TYPING_TIMEOUT);
+    } else {
+      clearTypingStatus();
     }
   };
 
+  // Send message (optimized)
   const send = async () => {
     if (!currentUser || !userData) {
       console.error("No user data");
@@ -191,33 +296,43 @@ export const TeamChatDrawer = ({
     const msg = text.trim();
     if (!msg) return;
 
+    // Validate message length (Firestore supports up to 1MB per document)
+    if (msg.length > 10000) {
+      alert("Message too long! Maximum 10,000 characters allowed.");
+      return;
+    }
+
     setSending(true);
+    
+    // Clear textarea immediately for better UX
+    const messageCopy = msg;
+    setText("");
+    
     try {
       await addDoc(collection(db, "teamChatMessages"), {
-        text: msg,
+        text: messageCopy,
         senderId: currentUser.uid,
         senderName: userData.displayName || "Unknown",
         senderDepartment: userData.department || "",
         createdAt: serverTimestamp(),
       });
 
-      setText("");
+      // Clear typing status
+      await clearTypingStatus();
 
-      try {
-        await deleteDoc(doc(db, "chatTyping", currentUser.uid));
-      } catch (error) {
-        // Ignore
-      }
-
+      // Focus back to textarea
       setTimeout(() => textareaRef.current?.focus(), 50);
     } catch (error) {
       console.error("Error sending message:", error);
-      alert("Failed to send message. Check console for details.");
+      alert("Failed to send message. Please try again.");
+      // Restore message on error
+      setText(messageCopy);
     } finally {
       setSending(false);
     }
   };
 
+  // Delete message
   const deleteMessage = async (messageId: string, isOwnMessage: boolean) => {
     const confirmed = window.confirm(
       isOwnMessage 
@@ -234,6 +349,7 @@ export const TeamChatDrawer = ({
     }
   };
 
+  // Handle keyboard shortcuts
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -241,8 +357,10 @@ export const TeamChatDrawer = ({
     }
   };
 
+  // Handle close with cleanup
   const handleClose = () => {
     setIsVisible(false);
+    clearTypingStatus();
     setTimeout(onClose, 250);
   };
 
@@ -250,7 +368,7 @@ export const TeamChatDrawer = ({
 
   return (
     <>
-      {/* Overlay with fade animation */}
+      {/* Overlay */}
       <div 
         className={`fixed inset-0 bg-black/30 z-40 transition-opacity duration-300 ${
           isVisible ? 'opacity-100' : 'opacity-0'
@@ -258,13 +376,13 @@ export const TeamChatDrawer = ({
         onClick={handleClose}
       />
 
-      {/* Drawer with slide-in animation */}
+      {/* Drawer */}
       <div 
         className={`fixed top-0 right-0 h-full w-full sm:w-[420px] md:w-[440px] bg-white z-50 shadow-2xl flex flex-col overflow-hidden transition-transform duration-300 ease-out ${
           isVisible ? 'translate-x-0' : 'translate-x-full'
         }`}
       >
-        {/* Header - Minimal & Mobile Optimized */}
+        {/* Header */}
         <div className="h-14 sm:h-16 px-3 sm:px-4 border-b flex items-center justify-between flex-shrink-0 bg-gradient-to-r from-primary-600 to-primary-700 shadow-md">
           <div className="flex items-center gap-2 text-white min-w-0">
             <MessageCircle className="h-5 w-5 sm:h-6 sm:w-6 flex-shrink-0" />
@@ -284,8 +402,34 @@ export const TeamChatDrawer = ({
           </button>
         </div>
 
-        {/* Messages Area - Mobile Optimized with NO OVERFLOW */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 sm:p-3 space-y-2 bg-gray-50">
+        {/* Messages Area */}
+        <div 
+          ref={messagesContainerRef}
+          className="flex-1 overflow-y-auto overflow-x-hidden p-2 sm:p-3 space-y-2 bg-gray-50"
+        >
+          {/* Load More Button */}
+          {hasMore && messages.length > 0 && (
+            <div className="flex justify-center py-2">
+              <button
+                onClick={loadMoreMessages}
+                disabled={loadingMore}
+                className="px-3 py-1.5 text-xs bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 flex items-center gap-2 transition-all"
+              >
+                {loadingMore ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Loading...
+                  </>
+                ) : (
+                  <>
+                    <ChevronUp className="h-3 w-3" />
+                    Load older messages
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+
           {messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-gray-400 px-4">
               <MessageCircle className="h-12 w-12 sm:h-16 sm:w-16 mb-2 sm:mb-3 opacity-40 animate-pulse" />
@@ -300,11 +444,10 @@ export const TeamChatDrawer = ({
               return (
                 <div
                   key={m.id}
-                  className={`flex ${mine ? "justify-end" : "justify-start"} gap-1.5 sm:gap-2 animate-fadeIn`}
-                  style={{ animationDelay: `${index * 0.02}s` }}
+                  className={`flex ${mine ? "justify-end" : "justify-start"} gap-1.5 sm:gap-2`}
                 >
                   <div className={`max-w-[78%] sm:max-w-[75%] min-w-0 ${mine ? "items-end" : "items-start"} flex flex-col`}>
-                    {/* Sender Info - Mobile Optimized */}
+                    {/* Sender Info */}
                     {!mine && (
                       <div className="flex items-center gap-1 sm:gap-1.5 mb-0.5 text-[10px] sm:text-xs px-1 max-w-full">
                         <span className="font-semibold text-gray-700 truncate flex-shrink-0 max-w-[100px] sm:max-w-[150px]">
@@ -321,7 +464,7 @@ export const TeamChatDrawer = ({
                       </div>
                     )}
 
-                    {/* Message Bubble - FIXED WORD WRAPPING */}
+                    {/* Message Bubble */}
                     <div
                       className={`rounded-2xl px-2.5 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm shadow-sm transition-all duration-200 hover:shadow-md ${
                         mine
@@ -340,11 +483,11 @@ export const TeamChatDrawer = ({
 
                     {/* Time */}
                     <span className="text-[9px] sm:text-[10px] text-gray-400 mt-0.5 px-1">
-                      {m.createdAt ? format(m.createdAt, "h:mm a") : "..."}
+                      {m.createdAt ? format(m.createdAt, "h:mm a") : "Sending..."}
                     </span>
                   </div>
 
-                  {/* Delete Button - Touch Optimized */}
+                  {/* Delete Button */}
                   {canDelete && (
                     <button
                       onClick={() => deleteMessage(m.id, mine)}
@@ -362,7 +505,7 @@ export const TeamChatDrawer = ({
           <div ref={bottomRef} />
         </div>
 
-        {/* Typing Indicator - Animated */}
+        {/* Typing Indicator */}
         {typingUsers.length > 0 && (
           <div className="px-3 sm:px-4 py-1.5 sm:py-2 bg-gray-50 border-t text-[10px] sm:text-xs text-gray-600 flex items-center gap-2 animate-fadeIn">
             <div className="flex gap-0.5 sm:gap-1 flex-shrink-0">
@@ -378,7 +521,7 @@ export const TeamChatDrawer = ({
           </div>
         )}
 
-        {/* Input - Mobile Optimized */}
+        {/* Input */}
         <div className="p-2 sm:p-3 border-t flex-shrink-0 bg-white safe-area-bottom">
           <div className="flex items-end gap-1.5 sm:gap-2">
             <textarea
@@ -390,7 +533,7 @@ export const TeamChatDrawer = ({
               placeholder="Type a message..."
               className="flex-1 resize-none px-3 py-2 sm:py-2.5 border border-gray-300 rounded-lg sm:rounded-xl focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-xs sm:text-sm transition-all duration-200"
               disabled={sending}
-              maxLength={1000}
+              maxLength={10000}
               style={{ minHeight: '36px', maxHeight: '120px' }}
             />
             <button
@@ -406,10 +549,13 @@ export const TeamChatDrawer = ({
               )}
             </button>
           </div>
+          <p className="text-[10px] text-gray-400 mt-1 px-1">
+            {text.length}/10,000 characters
+          </p>
         </div>
       </div>
 
-      {/* Add custom CSS animations */}
+      {/* CSS */}
       <style>{`
         @keyframes fadeIn {
           from {
@@ -426,18 +572,15 @@ export const TeamChatDrawer = ({
           animation: fadeIn 0.3s ease-out forwards;
         }
 
-        /* Safe area for mobile notches */
         .safe-area-bottom {
           padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
         }
 
-        /* Smooth scroll for messages */
         .overflow-y-auto {
           scroll-behavior: smooth;
           -webkit-overflow-scrolling: touch;
         }
 
-        /* Better mobile textarea with auto-grow */
         textarea {
           -webkit-appearance: none;
           -moz-appearance: none;
@@ -445,7 +588,6 @@ export const TeamChatDrawer = ({
           overflow-y: auto;
         }
 
-        /* Prevent zoom on iOS */
         @media screen and (max-width: 640px) {
           input[type="text"],
           textarea {

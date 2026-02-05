@@ -2,7 +2,16 @@ import { useEffect, useState } from 'react';
 import { collection, query, orderBy, limit, getDocs, where, Timestamp } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { CheckSquare, Users, Calendar, TrendingUp } from 'lucide-react';
+import { 
+  CheckSquare, 
+  Users, 
+  Calendar, 
+  Clock, 
+  ArrowRight,
+  Award,
+  Target,
+  TrendingUp
+} from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
 
@@ -16,6 +25,9 @@ interface Task {
   assignedToName?: string;
   createdAt: Date;
   dueDate: Date;
+  points?: number;
+  isRecurring?: boolean;
+  completionCount?: number;
 }
 
 interface Meeting {
@@ -24,6 +36,8 @@ interface Meeting {
   description: string;
   date: Date;
   location?: string;
+  status?: string;
+  attendees?: string[];
 }
 
 interface Stats {
@@ -32,6 +46,9 @@ interface Stats {
   upcomingMeetings: number;
   teamMembers: number;
   completionRate: number;
+  pendingTasks: number;
+  inProgressTasks: number;
+  totalPoints: number;
 }
 
 export const Dashboard = () => {
@@ -42,6 +59,9 @@ export const Dashboard = () => {
     upcomingMeetings: 0,
     teamMembers: 0,
     completionRate: 0,
+    pendingTasks: 0,
+    inProgressTasks: 0,
+    totalPoints: 0,
   });
   const [recentTasks, setRecentTasks] = useState<Task[]>([]);
   const [upcomingMeetings, setUpcomingMeetings] = useState<Meeting[]>([]);
@@ -55,16 +75,21 @@ export const Dashboard = () => {
     }
   }, [currentUser, userRole]);
 
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good morning';
+    if (hour < 18) return 'Good afternoon';
+    return 'Good evening';
+  };
+
   const fetchStats = async () => {
     try {
       const tasksRef = collection(db, 'tasks');
       let tasksQuery;
 
-      // Super Admin sees ALL tasks
       if (userRole === 'superadmin') {
         tasksQuery = query(tasksRef);
       } else {
-        // Members/Admins see only THEIR tasks
         tasksQuery = query(tasksRef, where('assignedTo', '==', currentUser?.uid));
       }
 
@@ -72,10 +97,21 @@ export const Dashboard = () => {
       const allTasks = tasksSnapshot.docs.map(doc => doc.data());
       
       const completedTasks = allTasks.filter(task => task.status === 'completed').length;
+      const pendingTasks = allTasks.filter(task => task.status === 'pending').length;
+      const inProgressTasks = allTasks.filter(task => task.status === 'in-progress').length;
       const totalTasks = allTasks.length;
       const completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
 
-      // Fetch upcoming meetings (all users see all meetings)
+      let totalPoints = 0;
+      if (userRole !== 'superadmin') {
+        const userStatsRef = collection(db, 'userStats');
+        const userStatsQuery = query(userStatsRef, where('userId', '==', currentUser?.uid));
+        const userStatsSnapshot = await getDocs(userStatsQuery);
+        if (!userStatsSnapshot.empty) {
+          totalPoints = userStatsSnapshot.docs[0].data().totalPoints || 0;
+        }
+      }
+
       const meetingsRef = collection(db, 'meetings');
       const meetingsQuery = query(
         meetingsRef,
@@ -84,7 +120,6 @@ export const Dashboard = () => {
       const meetingsSnapshot = await getDocs(meetingsQuery);
       const upcomingMeetings = meetingsSnapshot.size;
 
-      // Fetch team members (only for super admin)
       let teamMembers = 0;
       if (userRole === 'superadmin') {
         const usersSnapshot = await getDocs(collection(db, 'users'));
@@ -97,6 +132,9 @@ export const Dashboard = () => {
         upcomingMeetings,
         teamMembers,
         completionRate,
+        pendingTasks,
+        inProgressTasks,
+        totalPoints,
       });
     } catch (error) {
       console.error('Error fetching stats:', error);
@@ -108,11 +146,9 @@ export const Dashboard = () => {
       const tasksRef = collection(db, 'tasks');
       let q;
 
-      // Super Admin sees ALL tasks
       if (userRole === 'superadmin') {
         q = query(tasksRef, orderBy('createdAt', 'desc'), limit(5));
       } else {
-        // Members/Admins see only THEIR assigned tasks
         q = query(
           tasksRef,
           where('assignedTo', '==', currentUser?.uid),
@@ -162,27 +198,19 @@ export const Dashboard = () => {
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
-      case 'high':
-        return 'bg-red-100 text-red-700';
-      case 'medium':
-        return 'bg-yellow-100 text-yellow-700';
-      case 'low':
-        return 'bg-green-100 text-green-700';
-      default:
-        return 'bg-gray-100 text-gray-700';
+      case 'high': return 'bg-red-100 text-red-700';
+      case 'medium': return 'bg-yellow-100 text-yellow-700';
+      case 'low': return 'bg-green-100 text-green-700';
+      default: return 'bg-gray-100 text-gray-700';
     }
   };
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'completed':
-        return 'bg-green-100 text-green-700';
-      case 'in-progress':
-        return 'bg-blue-100 text-blue-700';
-      case 'pending':
-        return 'bg-gray-100 text-gray-700';
-      default:
-        return 'bg-gray-100 text-gray-700';
+      case 'completed': return 'bg-green-100 text-green-700';
+      case 'in-progress': return 'bg-blue-100 text-blue-700';
+      case 'pending': return 'bg-gray-100 text-gray-700';
+      default: return 'bg-gray-100 text-gray-700';
     }
   };
 
@@ -195,65 +223,90 @@ export const Dashboard = () => {
   }
 
   return (
-    <div>
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">
-          Welcome back, {userData?.displayName}!
-        </h1>
-        <p className="text-gray-600">Here's what's happening with your projects today</p>
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">
+            {getGreeting()}, {userData?.displayName?.split(' ')[0]}
+          </h1>
+          <p className="text-sm text-gray-600 mt-1">
+            {format(new Date(), 'EEEE, MMMM d, yyyy')}
+          </p>
+        </div>
+        <div className="text-right">
+          <div className="text-xs text-gray-500 uppercase tracking-wide">{userRole}</div>
+          <div className="text-lg font-semibold text-gray-900">{format(new Date(), 'h:mm a')}</div>
+        </div>
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-8">
-        <div className="card bg-gradient-to-br from-primary-50 to-white">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-600 mb-1">Total Tasks</p>
-              <p className="text-3xl font-bold text-gray-900">{stats.totalTasks}</p>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Link to="/tasks" className="group">
+          <div className="bg-white border border-gray-200 rounded-lg p-4 hover:border-blue-300 hover:shadow-sm transition-all">
+            <div className="flex items-center justify-between mb-2">
+              <CheckSquare className="h-5 w-5 text-blue-600" />
+              <ArrowRight className="h-4 w-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
             </div>
-            <div className="h-12 w-12 bg-primary-100 rounded-lg flex items-center justify-center">
-              <CheckSquare className="h-6 w-6 text-primary-600" />
+            <div className="text-2xl font-bold text-gray-900">{stats.totalTasks}</div>
+            <div className="text-xs text-gray-600 font-medium">Total Tasks</div>
+            <div className="text-xs text-gray-500 mt-1">
+              {stats.pendingTasks}P · {stats.inProgressTasks}A · {stats.completedTasks}C
             </div>
+          </div>
+        </Link>
+
+        <div className="bg-white border border-gray-200 rounded-lg p-4">
+          <div className="flex items-center justify-between mb-2">
+            <TrendingUp className="h-5 w-5 text-green-600" />
+            <div className="text-xs font-semibold text-green-700">{stats.completionRate}%</div>
+          </div>
+          <div className="text-2xl font-bold text-gray-900">{stats.completedTasks}</div>
+          <div className="text-xs text-gray-600 font-medium">Completed</div>
+          <div className="mt-2 w-full bg-gray-200 rounded-full h-1.5">
+            <div 
+              className="bg-green-600 h-1.5 rounded-full transition-all"
+              style={{ width: `${stats.completionRate}%` }}
+            />
           </div>
         </div>
 
-        <div className="card bg-gradient-to-br from-green-50 to-white">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-600 mb-1">Completed</p>
-              <p className="text-3xl font-bold text-gray-900">{stats.completedTasks}</p>
-              <p className="text-xs text-green-600 mt-2">{stats.completionRate}% completion rate</p>
+        <Link to="/meetings" className="group">
+          <div className="bg-white border border-gray-200 rounded-lg p-4 hover:border-purple-300 hover:shadow-sm transition-all">
+            <div className="flex items-center justify-between mb-2">
+              <Calendar className="h-5 w-5 text-purple-600" />
+              <ArrowRight className="h-4 w-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
             </div>
-            <div className="h-12 w-12 bg-green-100 rounded-lg flex items-center justify-center">
-              <TrendingUp className="h-6 w-6 text-green-600" />
-            </div>
+            <div className="text-2xl font-bold text-gray-900">{stats.upcomingMeetings}</div>
+            <div className="text-xs text-gray-600 font-medium">Meetings</div>
+            <div className="text-xs text-gray-500 mt-1">Upcoming scheduled</div>
           </div>
-        </div>
+        </Link>
 
-        <div className="card bg-gradient-to-br from-blue-50 to-white">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-600 mb-1">Upcoming Meetings</p>
-              <p className="text-3xl font-bold text-gray-900">{stats.upcomingMeetings}</p>
-            </div>
-            <div className="h-12 w-12 bg-blue-100 rounded-lg flex items-center justify-center">
-              <Calendar className="h-6 w-6 text-blue-600" />
-            </div>
-          </div>
-        </div>
-
-        {userRole === 'superadmin' && (
-          <div className="card bg-gradient-to-br from-purple-50 to-white">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600 mb-1">Team Members</p>
-                <p className="text-3xl font-bold text-gray-900">{stats.teamMembers}</p>
+        {userRole === 'superadmin' ? (
+          <Link to="/team" className="group">
+            <div className="bg-white border border-gray-200 rounded-lg p-4 hover:border-orange-300 hover:shadow-sm transition-all">
+              <div className="flex items-center justify-between mb-2">
+                <Users className="h-5 w-5 text-orange-600" />
+                <ArrowRight className="h-4 w-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
-              <div className="h-12 w-12 bg-purple-100 rounded-lg flex items-center justify-center">
-                <Users className="h-6 w-6 text-purple-600" />
-              </div>
+              <div className="text-2xl font-bold text-gray-900">{stats.teamMembers}</div>
+              <div className="text-xs text-gray-600 font-medium">Team Members</div>
+              <div className="text-xs text-gray-500 mt-1">Active users</div>
             </div>
-          </div>
+          </Link>
+        ) : (
+          <Link to="/reports" className="group">
+            <div className="bg-white border border-gray-200 rounded-lg p-4 hover:border-yellow-300 hover:shadow-sm transition-all">
+              <div className="flex items-center justify-between mb-2">
+                <Award className="h-5 w-5 text-yellow-600" />
+                <ArrowRight className="h-4 w-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </div>
+              <div className="text-2xl font-bold text-gray-900">{stats.totalPoints}</div>
+              <div className="text-xs text-gray-600 font-medium">Points Earned</div>
+              <div className="text-xs text-gray-500 mt-1">Total accumulated</div>
+            </div>
+          </Link>
         )}
       </div>
 
@@ -283,7 +336,7 @@ export const Dashboard = () => {
                     <span className={`px-2 py-1 rounded font-medium ${getStatusColor(task.status)}`}>
                       {task.status}
                     </span>
-                    <span className="text-gray-500">{format(task.createdAt, 'MMM d, yyyy')}</span>
+                    <span className="text-gray-500">Due: {format(task.dueDate, 'MMM d, yyyy')}</span>
                   </div>
                 </div>
               ))
@@ -314,7 +367,7 @@ export const Dashboard = () => {
                       <h3 className="font-medium text-gray-900 mb-1">{meeting.title}</h3>
                       <p className="text-sm text-gray-600 line-clamp-1 mb-2">{meeting.description}</p>
                       <div className="flex items-center text-xs text-gray-500">
-                        <Calendar className="h-3 w-3 mr-1" />
+                        <Clock className="h-3 w-3 mr-1" />
                         {format(meeting.date, 'PPP p')}
                       </div>
                     </div>
@@ -324,6 +377,25 @@ export const Dashboard = () => {
             ) : (
               <p className="text-center text-gray-500 py-8">No upcoming meetings</p>
             )}
+          </div>
+        </div>
+      </div>
+
+      {/* Summary Bar */}
+      <div className="bg-white border border-gray-200 rounded-lg px-4 py-3">
+        <div className="flex items-center justify-between text-sm">
+          <div className="flex items-center gap-2">
+            <Target className="h-4 w-4 text-gray-600" />
+            <span className="font-medium text-gray-900">Summary</span>
+          </div>
+          <div className="flex items-center gap-4 text-xs">
+            <span className="text-gray-600">{stats.pendingTasks} Pending</span>
+            <span className="text-gray-400">•</span>
+            <span className="text-blue-600">{stats.inProgressTasks} Active</span>
+            <span className="text-gray-400">•</span>
+            <span className="text-green-600">{stats.completedTasks} Done</span>
+            <span className="text-gray-400">•</span>
+            <span className="text-purple-600">{stats.upcomingMeetings} Meetings</span>
           </div>
         </div>
       </div>
