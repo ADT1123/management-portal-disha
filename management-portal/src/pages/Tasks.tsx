@@ -477,7 +477,7 @@ export const Tasks = () => {
 
         const clientInfo = selectedClients.length > 0 
           ? ` for ${selectedClients.length} client(s)` 
-          : selectedClient ? ` for ${selectedClient.name}` : '';
+          : '';
 
         await createNotification(
           userId,
